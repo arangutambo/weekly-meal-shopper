@@ -1,3 +1,5 @@
+const fs = require("node:fs");
+const path = require("node:path");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -59,4 +61,14 @@ test("createWeeklyMealPrepCanvas copies the plugin canvas template into the targ
   assert.equal(plugin.settings.weeklyCanvasPath, "Utility/⛑️ Weekly Meal Plan Week 45 2026.canvas");
   assert.deepEqual(opened, ["Utility/⛑️ Weekly Meal Plan Week 45 2026.canvas"]);
   assert.equal(createdFiles.length, 1);
+});
+
+test("bundled meal-prep canvas template keeps the scaffold but ships without recipe cards", () => {
+  const templatePath = path.resolve(__dirname, "..", "templates", "meal-prep-canvas-template.canvas");
+  const parsed = JSON.parse(fs.readFileSync(templatePath, "utf8"));
+  const nodes = Array.isArray(parsed.nodes) ? parsed.nodes : [];
+
+  assert.ok(nodes.length > 0);
+  assert.ok(nodes.every((node) => node.type === "group"));
+  assert.equal(nodes.some((node) => node.type === "file"), false);
 });

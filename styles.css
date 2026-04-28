@@ -87,6 +87,14 @@
   font-size: var(--font-ui-small);
 }
 
+.weekly-meal-shopper-template-editor {
+  width: 100%;
+  min-height: 60vh;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  line-height: 1.45;
+}
+
 .weekly-meal-shopper-recipe-view {
   display: grid;
   grid-template-columns: minmax(230px, 320px) minmax(0, 1fr);
