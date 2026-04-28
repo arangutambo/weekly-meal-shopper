@@ -2,6 +2,8 @@
 
 Weekly Meal Shopper standardizes recipe notes, parses ingredient metadata, and generates a categorized shopping checklist from a meal-plan canvas.
 
+The plugin ships with its own private starter templates inside the plugin folder. You do not need to configure Obsidian's Templates core plugin to use the recipe note or meal-prep canvas commands.
+
 ## Modes
 
 - Basic: recipe view, ingredient parsing/standardization, URL + image transcription into recipe templates.
@@ -25,15 +27,22 @@ Each mode can be toggled in plugin settings, and presets are available for quick
 - Apply frozen leftovers from meal-plan canvas
 - Show frozen portions available
 
+Plugin-owned template files:
+- `.obsidian/plugins/weekly-meal-shopper/templates/recipe-template.md`
+- `.obsidian/plugins/weekly-meal-shopper/templates/meal-prep-canvas-template.canvas`
+
+On a fresh install, these files are already present in the plugin. The commands create normal vault files from those plugin-owned templates.
+
 ## 5-Minute Quick Start
 
 1. Open plugin settings and enable both `Basic` and `Meal Prep` mode features.
 2. Set `Recipe folder`, `Transcribe recipes from image folder`, `Transcription output recipe folder`, and `Weekly meal-plan canvas`.
-3. Turn on `Delete transcribed source images` if you want the inbox images removed after successful conversion.
-4. (Optional) Run `Create weekly meal-prep canvas` to generate a fresh canvas and auto-set it.
-5. Run `Standardize recipe formats in configured folder`.
-6. Open your canvas and place recipe file cards.
-7. Run `Generate weekly shopping list from meal-plan canvas`.
+3. Run `Create weekly meal-prep canvas` to create a new weekly canvas from the plugin's bundled canvas template and auto-set it.
+4. Run `Create recipe note from template` whenever you want a new recipe note from the plugin's bundled recipe template.
+5. Turn on `Delete transcribed source images` if you want the inbox images removed after successful conversion.
+6. Run `Standardize recipe formats in configured folder`.
+7. Open your canvas and place recipe file cards.
+8. Run `Generate weekly shopping list from meal-plan canvas`.
 
 Supported image inbox formats for folder transcription include `jpg/jpeg`, `png`, `webp`, `gif`, `bmp`, `heic/heif` (Apple Photos), `tif/tiff`, and `avif`.
 

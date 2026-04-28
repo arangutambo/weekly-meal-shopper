@@ -18,7 +18,7 @@ const DEFAULT_SETTINGS = {
   featureMealPrepEnabled: true,
   weeklyCanvasPath: "Utility/⛑️ Weekly Meal Plan.canvas",
   mealPrepCanvasFolder: "Utility",
-  mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan {{date}}.canvas",
+  mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas",
   shoppingListOutputPath: "Utility/🛒 Weekly Shopping List.md",
   recipeFolder: "pages/Food and Drink/Recipes",
   transcriptionOutputFolder: "pages/Food and Drink/Recipes",
@@ -49,55 +49,22 @@ const DEFAULT_SETTINGS = {
   },
 };
 
-function buildDefaultRecipeTemplateContent() {
-  return [
-    "---",
-    "tags:",
-    "  - 🧠/🍽️/📄",
-    "CookTime: ",
-    "PrepTime: ",
-    "Portions: ",
-    "IngredientRecipes: []",
-    "IngredientsParsed: []",
-    "Cost:",
-    "RecipeRating: 3",
-    "MealPrep: false",
-    "WeekDay: false",
-    "PortionsPerMeal: 1",
-    "FrozenPortionsAvailable: 0",
-    "UseFrozenFirst: true",
-    "type: Recipe",
-    "Class: Recipe",
-    "FoodType: Meal Item",
-    "Collection: []",
-    "Cover: ",
-    "Link:",
-    "Day:",
-    "Time:",
-    "---",
-    "### Ingredients",
-    "- ",
-    "---",
-    "### Directions",
-    "1. ",
-    "---",
-    "### Notes",
-    "",
-    "---",
-    "### Nutrition",
-    "",
-    "---",
-    "### Log",
-    "```dataview",
-    "TASK",
-    "WHERE icontains(text, this.file.name)",
-    "GROUP BY file.name",
-    "SORT file.link DESC",
-    "```",
-    "---",
-    "### Tags",
-    "",
-  ].join("\n");
+const RECIPE_TEMPLATE_PATH = ".obsidian/plugins/weekly-meal-shopper/templates/recipe-template.md";
+const MEAL_PREP_CANVAS_TEMPLATE_PATH = ".obsidian/plugins/weekly-meal-shopper/templates/meal-prep-canvas-template.canvas";
+
+function getIsoWeekInfo(inputDate = new Date()) {
+  const date = new Date(inputDate);
+  date.setHours(0, 0, 0, 0);
+  const day = date.getDay() || 7;
+  date.setDate(date.getDate() + 4 - day);
+  const isoYear = date.getFullYear();
+  const yearStart = new Date(isoYear, 0, 1);
+  const week = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+  return {
+    isoYear,
+    week,
+    weekPadded: String(week).padStart(2, "0"),
+  };
 }
 
 const UNIT_DENSITY_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/unit-density-rules.json";
@@ -2271,9 +2238,12 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.excludedIngredientsExact = normalizeExactExclusionList(this.settings.excludedIngredientsExact);
     this.settings.ingredientOverrides = normalizeExactExclusionList(this.settings.ingredientOverrides);
     this.settings.mealPrepCanvasFolder = String(this.settings.mealPrepCanvasFolder || "Utility").trim() || "Utility";
+    if (String(this.settings.mealPrepCanvasNameTemplate || "").trim() === "⛑️ Weekly Meal Plan {{date}}.canvas") {
+      this.settings.mealPrepCanvasNameTemplate = DEFAULT_SETTINGS.mealPrepCanvasNameTemplate;
+    }
     this.settings.mealPrepCanvasNameTemplate = String(
-      this.settings.mealPrepCanvasNameTemplate || "⛑️ Weekly Meal Plan {{date}}.canvas"
-    ).trim() || "⛑️ Weekly Meal Plan {{date}}.canvas";
+      this.settings.mealPrepCanvasNameTemplate || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate
+    ).trim() || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate;
     this.settings.transcriptionImageFolder = String(this.settings.transcriptionImageFolder || "").trim()
       || "Utility/Recipe Image Inbox";
     this.settings.deleteTranscribedImages = this.settings.deleteTranscribedImages !== false;
@@ -2396,10 +2366,18 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   buildMealPrepCanvasFilename(date = new Date()) {
-    const template = String(this.settings.mealPrepCanvasNameTemplate || "⛑️ Weekly Meal Plan {{date}}.canvas");
-    const isoDate = new Date(date).toISOString().slice(0, 10);
-    const resolved = template.replace(/{{\s*date\s*}}/gi, isoDate).trim();
-    if (!resolved) return `⛑️ Weekly Meal Plan ${isoDate}.canvas`;
+    const template = String(
+      this.settings.mealPrepCanvasNameTemplate || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate
+    );
+    const isoDate = this.formatLocalIsoDate(date);
+    const weekInfo = getIsoWeekInfo(date);
+    const resolved = template
+      .replace(/{{\s*date\s*}}/gi, isoDate)
+      .replace(/{{\s*week\s*}}/gi, String(weekInfo.week))
+      .replace(/{{\s*weekPadded\s*}}/gi, weekInfo.weekPadded)
+      .replace(/{{\s*year\s*}}/gi, String(weekInfo.isoYear))
+      .trim();
+    if (!resolved) return `⛑️ Weekly Meal Plan Week ${weekInfo.week} ${weekInfo.isoYear}.canvas`;
     return resolved.endsWith(".canvas") ? resolved : `${resolved}.canvas`;
   }
 
@@ -2418,7 +2396,11 @@ class WeeklyMealShopperPlugin extends Plugin {
       return existing;
     }
 
-    const created = await this.app.vault.create(path, `${JSON.stringify({ nodes: [], edges: [] }, null, 2)}\n`);
+    const templateContent = await this.readPluginTemplate(MEAL_PREP_CANVAS_TEMPLATE_PATH);
+    const created = await this.app.vault.create(
+      path,
+      templateContent.endsWith("\n") ? templateContent : `${templateContent}\n`
+    );
     this.settings.weeklyCanvasPath = created.path;
     await this.saveSettings();
     await this.app.workspace.getLeaf(true).openFile(created);
@@ -2530,6 +2512,23 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
   }
 
+  formatLocalIsoDate(inputDate = new Date()) {
+    const date = new Date(inputDate);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  async readPluginTemplate(templatePath) {
+    const path = normalizePath(templatePath);
+    const exists = await this.app.vault.adapter.exists(path);
+    if (!exists) {
+      throw new Error(`Plugin template not found: ${path}`);
+    }
+    return await this.app.vault.adapter.read(path);
+  }
+
   getRecipeTemplateFolder() {
     return normalizePath(
       this.settings.recipeFolder || this.settings.transcriptionOutputFolder || "pages/Food and Drink/Recipes"
@@ -2561,7 +2560,11 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     const baseName = this.sanitizeRecipeFilename(result.value);
     const outputPath = this.buildUniqueVaultFilePath(folder, baseName, "md");
-    const created = await this.app.vault.create(outputPath, buildDefaultRecipeTemplateContent());
+    const templateContent = await this.readPluginTemplate(RECIPE_TEMPLATE_PATH);
+    const created = await this.app.vault.create(
+      outputPath,
+      templateContent.endsWith("\n") ? templateContent : `${templateContent}\n`
+    );
     await this.app.workspace.getLeaf(true).openFile(created);
     new Notice(`Recipe template created: ${created.path}`);
     return created;
@@ -4411,13 +4414,13 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Meal-prep canvas name template")
-      .setDesc("Use {{date}} in the filename template. Example: ⛑️ Weekly Meal Plan {{date}}.canvas")
+      .setDesc("Use {{week}}, {{year}}, {{weekPadded}}, or {{date}}. Example: ⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas")
       .addText((text) =>
         text
-          .setPlaceholder("⛑️ Weekly Meal Plan {{date}}.canvas")
-          .setValue(this.plugin.settings.mealPrepCanvasNameTemplate || "⛑️ Weekly Meal Plan {{date}}.canvas")
+          .setPlaceholder("⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas")
+          .setValue(this.plugin.settings.mealPrepCanvasNameTemplate || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate)
           .onChange(async (value) => {
-            this.plugin.settings.mealPrepCanvasNameTemplate = value.trim() || "⛑️ Weekly Meal Plan {{date}}.canvas";
+            this.plugin.settings.mealPrepCanvasNameTemplate = value.trim() || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate;
             await this.plugin.saveSettings();
           })
       );

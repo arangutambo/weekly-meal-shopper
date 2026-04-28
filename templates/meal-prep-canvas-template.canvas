@@ -1,0 +1,43 @@
+{
+	"nodes":[
+		{"id":"f90910c7a21fac32","type":"group","x":-640,"y":1800,"width":1830,"height":1960,"color":"5","label":"Projects"},
+		{"id":"9a70bf7a29cb915b","type":"group","x":1440,"y":1800,"width":1830,"height":1960,"color":"5","label":"Hosting"},
+		{"id":"0e4747ead5e72efb","type":"group","x":-960,"y":332,"width":4080,"height":308,"color":"4","label":"Dinner"},
+		{"id":"4edb456dd460d215","type":"group","x":-960,"y":720,"width":4080,"height":308,"color":"4","label":"Snack"},
+		{"id":"706a87e8d39193fd","type":"group","x":-960,"y":1180,"width":4080,"height":308,"color":"4","label":"Sweet"},
+		{"id":"8d9837dc8c89db79","type":"group","x":-960,"y":-480,"width":4080,"height":308,"color":"4","label":"Breakfast"},
+		{"id":"d0106717ed13c72d","type":"group","x":-960,"y":-74,"width":4080,"height":308,"color":"4","label":"Lunch"},
+		{"id":"1fe6a5460b2c2d9c","type":"group","x":940,"y":-508,"width":500,"height":2068,"color":"5","label":"Tuesday"},
+		{"id":"740e4f0faf2d822d","type":"group","x":1520,"y":-508,"width":480,"height":2068,"color":"5","label":"Wednesday"},
+		{"id":"bbfa0bcca3eac649","type":"group","x":2080,"y":-508,"width":480,"height":2068,"color":"5","label":"Thursday"},
+		{"id":"edfbe0316507be62","type":"group","x":-640,"y":-508,"width":480,"height":2068,"color":"5","label":"Saturday"},
+		{"id":"87dc9d1c686ac86b","type":"group","x":2640,"y":-508,"width":480,"height":2068,"color":"5","label":"Friday"},
+		{"id":"c8f5f4efc8049602","type":"group","x":-100,"y":-508,"width":460,"height":2068,"color":"5","label":"Sunday"},
+		{"id":"7d48176f6ea25397","type":"group","x":440,"y":-508,"width":440,"height":2068,"color":"5","label":"Monday"},
+		{"id":"08733fa5520b79d6","type":"file","file":"pages/Japanese Pressure-Cooker Beef Stew.md","x":2680,"y":-36,"width":400,"height":112},
+		{"id":"f86883d2c59f5cb6","type":"file","file":"pages/Simple Roasted Pumpkin.md","x":2680,"y":100,"width":400,"height":112},
+		{"id":"d9c2d4783c3efddc","type":"file","file":"pages/Pasta Grannies Alba's Ragu.md","x":2130,"y":360,"width":380,"height":140},
+		{"id":"a88d8d247fad0341","type":"file","file":"pages/Chickpea Stew with Chorizo from Barcelona Stephen Mitsch.md","x":480,"y":408,"width":380,"height":154},
+		{"id":"842cf43c294e4b77","type":"file","file":"pages/Chickpea Stew with Chorizo from Barcelona Stephen Mitsch.md","x":1000,"y":408,"width":380,"height":154},
+		{"id":"63456d0e9357254f","type":"file","file":"pages/Avocado on Toast with Feta.md","x":1540,"y":-417,"width":420,"height":180},
+		{"id":"50854ff53a5d1c94","type":"file","file":"pages/Chickpea Stew with Chorizo from Barcelona Stephen Mitsch.md","x":1540,"y":408,"width":380,"height":154},
+		{"id":"79f533e58712e94c","type":"file","file":"pages/Pasta Grannies Alba's Ragu.md","x":2700,"y":360,"width":380,"height":140},
+		{"id":"84d8e97d68d88194","type":"file","file":"pages/Premade Dried Pasta.md","x":2700,"y":520,"width":380,"height":120},
+		{"id":"d7a31bbe7ea26e71","type":"file","file":"pages/Avocado on Toast with Feta.md","x":1000,"y":-405,"width":380,"height":185},
+		{"id":"88a64e78064f690a","type":"file","file":"pages/Dr. Greger Weight Loss Smoothie Monstrosity.md","x":2700,"y":-405,"width":380,"height":185},
+		{"id":"786181bca6f0c905","type":"file","file":"pages/Premade Dried Pasta.md","x":2090,"y":512,"width":420,"height":100},
+		{"id":"9b06a122987cf417","type":"file","file":"pages/Japanese Pressure-Cooker Beef Stew.md","x":2100,"y":-36,"width":400,"height":112},
+		{"id":"cc692a54df008cc9","type":"file","file":"pages/Simple Roasted Pumpkin.md","x":2100,"y":100,"width":400,"height":112},
+		{"id":"b3dc0ecdd693c957","type":"file","file":"pages/Avocado on Toast with Feta.md","x":2120,"y":-417,"width":420,"height":180},
+		{"id":"3f9310bfa190a5fd","type":"file","file":"pages/9 Layer Salad by Allison Day.md","x":480,"y":16,"width":360,"height":140},
+		{"id":"b60170310923eb81","type":"file","file":"pages/9 Layer Salad by Allison Day.md","x":1020,"y":6,"width":360,"height":140},
+		{"id":"20d0d0422022a9f7","type":"file","file":"pages/9 Layer Salad by Allison Day.md","x":1570,"y":20,"width":360,"height":140},
+		{"id":"cdb4fa99bb35d0cc","type":"file","file":"pages/Dr. Greger Weight Loss Smoothie Monstrosity.md","x":460,"y":-405,"width":380,"height":185}
+	],
+	"edges":[],
+	"metadata":{
+		"version":"1.0-1.0",
+		"frontmatter":{},
+		"startNode":"8f08d5322459761d"
+	}
+}

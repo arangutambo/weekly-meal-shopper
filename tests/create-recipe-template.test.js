@@ -13,6 +13,7 @@ test("createRecipeFromTemplate creates a duplicate-safe recipe note from the har
   const files = new Map([
     ["pages/My Pasta.md", { path: "pages/My Pasta.md" }],
   ]);
+  const templateContent = "---\nCustom: true\n---\n### Ingredients\n- \n";
 
   plugin.settings = {
     recipeFolder: "pages",
@@ -30,6 +31,10 @@ test("createRecipeFromTemplate creates a duplicate-safe recipe note from the har
         files.set(filePath, created);
         return created;
       },
+      adapter: {
+        exists: async (filePath) => filePath === ".obsidian/plugins/weekly-meal-shopper/templates/recipe-template.md",
+        read: async () => templateContent,
+      },
     },
     workspace: {
       getLeaf: () => ({
@@ -44,8 +49,6 @@ test("createRecipeFromTemplate creates a duplicate-safe recipe note from the har
 
   assert.equal(ensuredFolder, "pages");
   assert.equal(created.path, "pages/My Pasta 2.md");
-  assert.match(created.content, /^---\ntags:\n  - 🧠\/🍽️\/📄\nCookTime: /);
-  assert.match(created.content, /### Ingredients\n- \n---\n### Directions\n1\. /);
-  assert.match(created.content, /```dataview\nTASK\nWHERE icontains\(text, this\.file\.name\)/);
+  assert.equal(created.content, templateContent);
   assert.deepEqual(opened, ["pages/My Pasta 2.md"]);
 });
