@@ -12,6 +12,7 @@ Each mode can be toggled in plugin settings, and presets are available for quick
 ## Commands
 
 - Open recipe view in current tab
+- Create recipe note from template
 - Standardize current recipe format
 - Standardize recipe formats in configured folder
 - Populate ingredient metadata from recipe section

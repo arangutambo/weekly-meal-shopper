@@ -49,6 +49,57 @@ const DEFAULT_SETTINGS = {
   },
 };
 
+function buildDefaultRecipeTemplateContent() {
+  return [
+    "---",
+    "tags:",
+    "  - 🧠/🍽️/📄",
+    "CookTime: ",
+    "PrepTime: ",
+    "Portions: ",
+    "IngredientRecipes: []",
+    "IngredientsParsed: []",
+    "Cost:",
+    "RecipeRating: 3",
+    "MealPrep: false",
+    "WeekDay: false",
+    "PortionsPerMeal: 1",
+    "FrozenPortionsAvailable: 0",
+    "UseFrozenFirst: true",
+    "type: Recipe",
+    "Class: Recipe",
+    "FoodType: Meal Item",
+    "Collection: []",
+    "Cover: ",
+    "Link:",
+    "Day:",
+    "Time:",
+    "---",
+    "### Ingredients",
+    "- ",
+    "---",
+    "### Directions",
+    "1. ",
+    "---",
+    "### Notes",
+    "",
+    "---",
+    "### Nutrition",
+    "",
+    "---",
+    "### Log",
+    "```dataview",
+    "TASK",
+    "WHERE icontains(text, this.file.name)",
+    "GROUP BY file.name",
+    "SORT file.link DESC",
+    "```",
+    "---",
+    "### Tags",
+    "",
+  ].join("\n");
+}
+
 const UNIT_DENSITY_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/unit-density-rules.json";
 const UNIT_ALIAS_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/unit-aliases.json";
 
@@ -2063,6 +2114,15 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "create-recipe-note-from-template",
+      name: "Create recipe note from template",
+      callback: async () => {
+        if (!this.requireFeatureEnabled("basic", "Recipe template creation")) return;
+        await this.createRecipeFromTemplate();
+      },
+    });
+
+    this.addCommand({
       id: "set-active-canvas-as-weekly-plan",
       name: "Set active canvas as weekly meal plan",
       checkCallback: (checking) => {
@@ -2459,17 +2519,52 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
   }
 
-  async promptTextEntry({ title, label, submitText = "OK" }) {
+  async promptTextEntry(options = {}) {
     return await new Promise((resolve) => {
       const modal = new TextEntryModal(this.app, {
-        title,
-        label,
-        submitText,
+        ...options,
         onSubmit: (value) => resolve({ value }),
         onCancel: () => resolve({ cancelled: true }),
       });
       modal.open();
     });
+  }
+
+  getRecipeTemplateFolder() {
+    return normalizePath(
+      this.settings.recipeFolder || this.settings.transcriptionOutputFolder || "pages/Food and Drink/Recipes"
+    );
+  }
+
+  buildUniqueVaultFilePath(folder, baseName, extension = "md") {
+    const ext = String(extension || "md").replace(/^\./, "") || "md";
+    let outputPath = normalizePath(`${folder}/${baseName}.${ext}`);
+    let counter = 2;
+    while (this.app.vault.getAbstractFileByPath(outputPath)) {
+      outputPath = normalizePath(`${folder}/${baseName} ${counter}.${ext}`);
+      counter += 1;
+    }
+    return outputPath;
+  }
+
+  async createRecipeFromTemplate() {
+    const result = await this.promptTextEntry({
+      title: "Create recipe from template",
+      label: "Recipe file name",
+      submitText: "Create",
+      emptyError: "Please enter a recipe name.",
+    });
+    if (result?.cancelled) return null;
+
+    const folder = this.getRecipeTemplateFolder();
+    await this.ensureFolderPathExists(folder);
+
+    const baseName = this.sanitizeRecipeFilename(result.value);
+    const outputPath = this.buildUniqueVaultFilePath(folder, baseName, "md");
+    const created = await this.app.vault.create(outputPath, buildDefaultRecipeTemplateContent());
+    await this.app.workspace.getLeaf(true).openFile(created);
+    new Notice(`Recipe template created: ${created.path}`);
+    return created;
   }
 
   getTranscriptionApiKey() {
@@ -2773,12 +2868,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     );
     await this.ensureFolderPathExists(folder);
     const baseName = this.sanitizeRecipeFilename(noteRecipe.title);
-    let outputPath = normalizePath(`${folder}/${baseName}.md`);
-    let counter = 2;
-    while (this.app.vault.getAbstractFileByPath(outputPath)) {
-      outputPath = normalizePath(`${folder}/${baseName} ${counter}.md`);
-      counter += 1;
-    }
+    const outputPath = this.buildUniqueVaultFilePath(folder, baseName, "md");
 
     const content = this.buildTranscribedRecipeNoteContent(noteRecipe);
     const created = await this.app.vault.create(outputPath, content);
