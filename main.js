@@ -32,6 +32,7 @@ const DEFAULT_SETTINGS = {
   tspShorthand: "tsp",
   ingredientLineTemplate: "{{Amount}} {{Unit}} {{Ingredient}}",
   transcriptionMetricOutput: true,
+  useStoredTranscriptionApiKey: false,
   parsedIngredientsField: "IngredientsParsed",
   excludedIngredientsExact: [],
   ingredientOverrides: [],
@@ -39,12 +40,17 @@ const DEFAULT_SETTINGS = {
   deleteTranscribedImages: true,
   transcriptionApiKey: "",
   transcriptionModel: "gpt-4.1-mini",
+  recipeTemplateVaultPath: "Templates/Weekly Meal Shopper/Recipe Template.md",
+  mealPrepCanvasTemplateVaultPath: "Templates/Weekly Meal Shopper/Meal Prep Canvas Template.canvas",
   showCategoryReasonsInShoppingList: true,
   includeOverrideLinksInShoppingList: false,
   settingsImportExportPath: ".obsidian/plugins/weekly-meal-shopper/settings-export.json",
   settingsSectionState: {
     workflowModeCollapsed: false,
     howItWorksCollapsed: false,
+    firstTimeSetupCollapsed: false,
+    recipeTemplateStorageCollapsed: false,
+    mealPrepCanvasTemplateStorageCollapsed: false,
     mealPrepSetupCollapsed: false,
     recipeSetupCollapsed: false,
     ingredientFormatCollapsed: false,
@@ -848,7 +854,8 @@ function formatIngredientLineFromParsed(
     if (metricMode || usingWeightMetric) {
       if (effective.unitMetric === "unit") {
         amount = formatMetricAmount(effective.amount);
-        unit = "";
+        // Keep explicit countable units like "can" or "clove" instead of dropping them in metric mode.
+        unit = effective.unitExplicit ? effective.unit : "";
       } else {
         amount = formatMetricAmount(effective.amountMetric);
         unit = effective.unitMetric;
@@ -2173,6 +2180,22 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "populate-editable-recipe-template",
+      name: "Populate editable recipe template in vault",
+      callback: async () => {
+        await this.populateEditableRecipeTemplateInVault();
+      },
+    });
+
+    this.addCommand({
+      id: "populate-editable-meal-prep-canvas-template",
+      name: "Populate editable meal-prep canvas template in vault",
+      callback: async () => {
+        await this.populateEditableMealPrepCanvasTemplateInVault();
+      },
+    });
+
+    this.addCommand({
       id: "set-active-canvas-as-weekly-plan",
       name: "Set active canvas as weekly meal plan",
       checkCallback: (checking) => {
@@ -2330,6 +2353,12 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.transcriptionImageFolder = String(this.settings.transcriptionImageFolder || "").trim()
       || "Utility/Recipe Image Inbox";
     this.settings.deleteTranscribedImages = this.settings.deleteTranscribedImages !== false;
+    this.settings.recipeTemplateVaultPath = String(
+      this.settings.recipeTemplateVaultPath || DEFAULT_SETTINGS.recipeTemplateVaultPath
+    ).trim() || DEFAULT_SETTINGS.recipeTemplateVaultPath;
+    this.settings.mealPrepCanvasTemplateVaultPath = String(
+      this.settings.mealPrepCanvasTemplateVaultPath || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath
+    ).trim() || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath;
     this.settings.transcriptionOutputFolder = String(
       this.settings.transcriptionOutputFolder || this.settings.recipeFolder || "pages/Food and Drink/Recipes"
     ).trim() || "pages/Food and Drink/Recipes";
@@ -2362,6 +2391,9 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.settingsSectionState = {
       workflowModeCollapsed: !!sectionState.workflowModeCollapsed,
       howItWorksCollapsed: !!sectionState.howItWorksCollapsed,
+      firstTimeSetupCollapsed: !!sectionState.firstTimeSetupCollapsed,
+      recipeTemplateStorageCollapsed: !!sectionState.recipeTemplateStorageCollapsed,
+      mealPrepCanvasTemplateStorageCollapsed: !!sectionState.mealPrepCanvasTemplateStorageCollapsed,
       mealPrepSetupCollapsed: !!sectionState.mealPrepSetupCollapsed,
       recipeSetupCollapsed: !!sectionState.recipeSetupCollapsed,
       ingredientFormatCollapsed: !!sectionState.ingredientFormatCollapsed,
@@ -2373,6 +2405,9 @@ class WeeklyMealShopperPlugin extends Plugin {
       categoryLibraryCollapsed: !!sectionState.categoryLibraryCollapsed,
     };
     this.settings.transcriptionApiKey = String(this.settings.transcriptionApiKey || "").trim();
+    if (typeof this.settings.useStoredTranscriptionApiKey !== "boolean") {
+      this.settings.useStoredTranscriptionApiKey = !!this.normalizeApiKey(this.settings.transcriptionApiKey);
+    }
     this.settings.transcriptionModel = String(this.settings.transcriptionModel || "gpt-4.1-mini").trim()
       || "gpt-4.1-mini";
     setActiveMeasurementProfile(this.settings);
@@ -2487,7 +2522,16 @@ class WeeklyMealShopperPlugin extends Plugin {
       return existing;
     }
 
-    const templateContent = await this.readPluginTemplate(MEAL_PREP_CANVAS_TEMPLATE_PATH);
+    let templateContent = "";
+    try {
+      templateContent = await this.readEditableVaultTemplate(
+        this.getEditableMealPrepCanvasTemplatePath(),
+        "Editable meal-prep canvas template not found. Run the populate template action in First-time setup first."
+      );
+    } catch (error) {
+      new Notice(error?.message || String(error));
+      return null;
+    }
     const created = await this.app.vault.create(
       path,
       templateContent.endsWith("\n") ? templateContent : `${templateContent}\n`
@@ -2620,6 +2664,90 @@ class WeeklyMealShopperPlugin extends Plugin {
     return await this.app.vault.adapter.read(path);
   }
 
+  getEditableRecipeTemplatePath() {
+    return normalizePath(this.settings.recipeTemplateVaultPath || DEFAULT_SETTINGS.recipeTemplateVaultPath);
+  }
+
+  getEditableMealPrepCanvasTemplatePath() {
+    return normalizePath(this.settings.mealPrepCanvasTemplateVaultPath || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath);
+  }
+
+  getParentFolderPath(filePath) {
+    return normalizePath(String(filePath || "").trim()).split("/").slice(0, -1).join("/");
+  }
+
+  async ensureParentFolderForFilePath(filePath) {
+    const folder = this.getParentFolderPath(filePath);
+    if (folder) await this.ensureFolderPathExists(folder);
+  }
+
+  async openVaultFileByPath(filePath, missingMessage = "Vault file not found.") {
+    const path = normalizePath(filePath);
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      new Notice(missingMessage);
+      return null;
+    }
+    await this.app.workspace.getLeaf(true).openFile(file);
+    return file;
+  }
+
+  async readEditableVaultTemplate(templatePath, missingMessage) {
+    const path = normalizePath(templatePath);
+    const exists = await this.app.vault.adapter.exists(path);
+    if (!exists) {
+      throw new Error(missingMessage || `Editable template not found: ${path}`);
+    }
+    return await this.app.vault.adapter.read(path);
+  }
+
+  async populateVaultTemplateFromBundledBase({
+    bundledTemplatePath,
+    targetPath,
+    label,
+  }) {
+    const normalizedTarget = normalizePath(String(targetPath || "").trim());
+    if (!normalizedTarget) {
+      throw new Error(`Set a target path for ${label.toLowerCase()} first.`);
+    }
+
+    await this.ensureParentFolderForFilePath(normalizedTarget);
+    const existing = this.app.vault.getAbstractFileByPath(normalizedTarget);
+    if (existing instanceof TFile) {
+      await this.app.workspace.getLeaf(true).openFile(existing);
+      new Notice(`${label} already exists: ${existing.path}`);
+      return existing;
+    }
+    if (existing) {
+      throw new Error(`Cannot create ${label.toLowerCase()} because ${normalizedTarget} is not a file path.`);
+    }
+
+    const templateContent = await this.readPluginTemplate(bundledTemplatePath);
+    const created = await this.app.vault.create(
+      normalizedTarget,
+      templateContent.endsWith("\n") ? templateContent : `${templateContent}\n`
+    );
+    await this.app.workspace.getLeaf(true).openFile(created);
+    new Notice(`${label} created: ${created.path}`);
+    return created;
+  }
+
+  async populateEditableRecipeTemplateInVault() {
+    return await this.populateVaultTemplateFromBundledBase({
+      bundledTemplatePath: RECIPE_TEMPLATE_PATH,
+      targetPath: this.getEditableRecipeTemplatePath(),
+      label: "Editable recipe template",
+    });
+  }
+
+  async populateEditableMealPrepCanvasTemplateInVault() {
+    return await this.populateVaultTemplateFromBundledBase({
+      bundledTemplatePath: MEAL_PREP_CANVAS_TEMPLATE_PATH,
+      targetPath: this.getEditableMealPrepCanvasTemplatePath(),
+      label: "Editable meal-prep canvas template",
+    });
+  }
+
   async openPluginTemplateFile(templatePath, missingMessage = "Plugin template file not found.") {
     const path = normalizePath(templatePath);
     const file = this.app.vault.getAbstractFileByPath(path);
@@ -2696,7 +2824,16 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     const baseName = this.sanitizeRecipeFilename(result.value);
     const outputPath = this.buildUniqueVaultFilePath(folder, baseName, "md");
-    const templateContent = await this.readPluginTemplate(RECIPE_TEMPLATE_PATH);
+    let templateContent = "";
+    try {
+      templateContent = await this.readEditableVaultTemplate(
+        this.getEditableRecipeTemplatePath(),
+        "Editable recipe template not found. Run the populate template action in First-time setup first."
+      );
+    } catch (error) {
+      new Notice(error?.message || String(error));
+      return null;
+    }
     const created = await this.app.vault.create(
       outputPath,
       templateContent.endsWith("\n") ? templateContent : `${templateContent}\n`
@@ -2715,26 +2852,30 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   async resolveTranscriptionApiKey() {
-    const candidates = [
-      this.settings?.transcriptionApiKey,
-      this.settings?.openaiApiKey,
-      this.settings?.openAIApiKey,
-      this.settings?.apiKey,
-    ];
+    const candidates = [];
 
-    if (typeof this.loadData === "function") {
-      try {
-        const persisted = await this.loadData();
-        if (persisted && typeof persisted === "object") {
-          candidates.push(
-            persisted.transcriptionApiKey,
-            persisted.openaiApiKey,
-            persisted.openAIApiKey,
-            persisted.apiKey
-          );
+    if (this.settings?.useStoredTranscriptionApiKey) {
+      candidates.push(
+        this.settings?.transcriptionApiKey,
+        this.settings?.openaiApiKey,
+        this.settings?.openAIApiKey,
+        this.settings?.apiKey
+      );
+
+      if (typeof this.loadData === "function") {
+        try {
+          const persisted = await this.loadData();
+          if (persisted && typeof persisted === "object") {
+            candidates.push(
+              persisted.transcriptionApiKey,
+              persisted.openaiApiKey,
+              persisted.openAIApiKey,
+              persisted.apiKey
+            );
+          }
+        } catch {
+          // Fall through to the remaining candidates.
         }
-      } catch {
-        // Fall through to the remaining candidates.
       }
     }
 
@@ -4499,6 +4640,61 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     }
   }
 
+  renderTemplateStorageSection(containerEl, {
+    stateKey,
+    title,
+    description,
+    pathLabel,
+    pathDescription,
+    pathPlaceholder,
+    pathValue,
+    onPathChange,
+    onPopulate,
+    onOpen,
+    populateText,
+    openText,
+  }) {
+    const { body } = this.buildFoldableSection(containerEl, {
+      stateKey,
+      title,
+      description,
+    });
+
+    new Setting(body)
+      .setName(pathLabel)
+      .setDesc(pathDescription)
+      .addText((text) =>
+        text
+          .setPlaceholder(pathPlaceholder)
+          .setValue(pathValue)
+          .onChange(async (value) => {
+            await onPathChange(value);
+          })
+      );
+
+    new Setting(body)
+      .setName("Template actions")
+      .setDesc("Create the editable vault copy from the bundled plugin base, then open that vault file for normal editing.")
+      .addButton((btn) =>
+        btn.setButtonText(populateText).onClick(async () => {
+          try {
+            await onPopulate();
+          } catch (error) {
+            new Notice(error?.message || String(error));
+          }
+        })
+      )
+      .addButton((btn) =>
+        btn.setButtonText(openText).onClick(async () => {
+          try {
+            await onOpen();
+          } catch (error) {
+            new Notice(error?.message || String(error));
+          }
+        })
+      );
+  }
+
   async display() {
     const { containerEl } = this;
     containerEl.empty();
@@ -4582,6 +4778,62 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       cls: "weekly-meal-shopper-help",
     });
 
+    const { body: firstTimeSetupBody } = this.buildFoldableSection(containerEl, {
+      stateKey: "firstTimeSetupCollapsed",
+      title: "First-time setup",
+      description: "Choose where the editable template copies live in your vault. The bundled plugin templates stay inside the plugin and are only used to initialize these editable vault files.",
+    });
+
+    this.renderTemplateStorageSection(firstTimeSetupBody, {
+      stateKey: "recipeTemplateStorageCollapsed",
+      title: "Editable recipe template",
+      description: "This is the vault file the recipe creation command will read from after setup.",
+      pathLabel: "Vault path",
+      pathDescription: "Where the editable recipe template copy should live in your vault.",
+      pathPlaceholder: DEFAULT_SETTINGS.recipeTemplateVaultPath,
+      pathValue: this.plugin.settings.recipeTemplateVaultPath || DEFAULT_SETTINGS.recipeTemplateVaultPath,
+      onPathChange: async (value) => {
+        this.plugin.settings.recipeTemplateVaultPath = value.trim() || DEFAULT_SETTINGS.recipeTemplateVaultPath;
+        await this.plugin.saveSettings();
+      },
+      onPopulate: async () => {
+        await this.plugin.populateEditableRecipeTemplateInVault();
+      },
+      onOpen: async () => {
+        await this.plugin.openVaultFileByPath(
+          this.plugin.getEditableRecipeTemplatePath(),
+          "Editable recipe template not found. Populate it in First-time setup first."
+        );
+      },
+      populateText: "Populate Recipe Template",
+      openText: "Open Recipe Template",
+    });
+
+    this.renderTemplateStorageSection(firstTimeSetupBody, {
+      stateKey: "mealPrepCanvasTemplateStorageCollapsed",
+      title: "Editable meal-prep canvas template",
+      description: "This is the vault file the weekly canvas creation command will read from after setup.",
+      pathLabel: "Vault path",
+      pathDescription: "Where the editable meal-prep canvas template copy should live in your vault.",
+      pathPlaceholder: DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath,
+      pathValue: this.plugin.settings.mealPrepCanvasTemplateVaultPath || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath,
+      onPathChange: async (value) => {
+        this.plugin.settings.mealPrepCanvasTemplateVaultPath = value.trim() || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath;
+        await this.plugin.saveSettings();
+      },
+      onPopulate: async () => {
+        await this.plugin.populateEditableMealPrepCanvasTemplateInVault();
+      },
+      onOpen: async () => {
+        await this.plugin.openVaultFileByPath(
+          this.plugin.getEditableMealPrepCanvasTemplatePath(),
+          "Editable meal-prep canvas template not found. Populate it in First-time setup first."
+        );
+      },
+      populateText: "Populate Canvas Template",
+      openText: "Open Canvas Template",
+    });
+
     this.renderCategoryHeading(containerEl, {
       title: "Meal Prep",
       description: "Weekly canvas creation, naming, template access, and shopping-list output live here.",
@@ -4590,7 +4842,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     const { body: mealPrepBody } = this.buildFoldableSection(containerEl, {
       stateKey: "mealPrepSetupCollapsed",
       title: "Meal-prep setup",
-      description: "Canvas paths, naming, plugin-owned canvas template access, and shopping-list behavior.",
+      description: "Canvas paths, naming, and shopping-list behavior.",
     });
 
     new Setting(mealPrepBody)
@@ -4630,22 +4882,6 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
             this.plugin.settings.mealPrepCanvasNameTemplate = value.trim() || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate;
             await this.plugin.saveSettings();
           })
-      );
-
-    new Setting(mealPrepBody)
-      .setName("Meal-prep canvas template file")
-      .setDesc(`Plugin-owned canvas source: ${MEAL_PREP_CANVAS_TEMPLATE_PATH}`)
-      .addButton((btn) =>
-        btn.setButtonText("Edit Canvas Template").onClick(async () => {
-          await this.plugin.editPluginTemplateFile(
-            MEAL_PREP_CANVAS_TEMPLATE_PATH,
-            {
-              title: "Edit meal-prep canvas template",
-              successMessage: "Meal-prep canvas template saved.",
-              missingMessage: "Could not find the plugin meal-prep canvas template file.",
-            }
-          );
-        })
       );
 
     new Setting(mealPrepBody)
@@ -4693,24 +4929,8 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     const { body: recipeSetupBody } = this.buildFoldableSection(containerEl, {
       stateKey: "recipeSetupCollapsed",
       title: "Recipe setup",
-      description: "Recipe note output paths, metadata fields, and the plugin-owned recipe template.",
+      description: "Recipe note output paths and metadata fields used by the recipe commands.",
     });
-
-    new Setting(recipeSetupBody)
-      .setName("Recipe note template file")
-      .setDesc(`Plugin-owned recipe source: ${RECIPE_TEMPLATE_PATH}`)
-      .addButton((btn) =>
-        btn.setButtonText("Edit Recipe Template").onClick(async () => {
-          await this.plugin.editPluginTemplateFile(
-            RECIPE_TEMPLATE_PATH,
-            {
-              title: "Edit recipe note template",
-              successMessage: "Recipe note template saved.",
-              missingMessage: "Could not find the plugin recipe template file.",
-            }
-          );
-        })
-      );
 
     new Setting(recipeSetupBody)
       .setName("Recipe folder")
