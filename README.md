@@ -58,6 +58,19 @@ On a fresh install, these files are already present in the plugin. `Run First-Ti
 
 Supported image inbox formats for folder transcription include `jpg/jpeg`, `png`, `webp`, `gif`, `bmp`, `heic/heif` (Apple Photos), `tif/tiff`, and `avif`.
 
+### Expanded Walkthrough
+
+1. Open plugin settings and run `Run First-Time Setup`.
+2. Choose where the editable recipe template and editable meal-prep canvas template should live in your vault.
+3. Use the recipe and meal-prep features you want to use. The plugin now runs as one combined workflow, so there are no separate Basic or Meal Prep toggles to enable.
+4. Set `Recipe folder`, `Transcribe recipes from image folder`, `Transcription output recipe folder`, and `Weekly meal-plan canvas`.
+5. Run `Create weekly meal-prep canvas`.
+6. Run `Create recipe note from template` whenever you want a new recipe note.
+7. Open your canvas and place recipe file cards.
+8. Run `Generate weekly shopping list from meal-plan canvas`.
+
+Supported image inbox formats for folder transcription include `jpg/jpeg`, `png`, `webp`, `gif`, `bmp`, `heic/heif` (Apple Photos), `tif/tiff`, and `avif`.
+
 ## Recipe Parsing + Formatting
 
 - Ingredients are parsed from the `### Ingredients` section.
