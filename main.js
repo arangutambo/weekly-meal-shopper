@@ -292,14 +292,21 @@ function estimateIngredientDensityGPerMl(name) {
   return null;
 }
 
+function isLikelyLiquidIngredient(name) {
+  const text = normalizeSearchText(name);
+  if (!text) return false;
+  return /\b(water|stock|broth|vinegar|milk|juice|oil|yogurt|yoghurt|syrup|molasses|honey|brine)\b/.test(text);
+}
+
 function applyMeasurementPreferenceToParsedItem(parsed, { preferWeight = ACTIVE_MEASUREMENT_PREFERENCE === "weight" } = {}) {
   if (!parsed || typeof parsed !== "object") return parsed;
-  if (!preferWeight || parsed.unitMetric !== "ml") return parsed;
-  const normalizedName = normalizeSearchText(parsed.name);
-  if (detectCitrusKey(parsed.name) && /\bjuice\b/.test(normalizedName)) return parsed;
+  if (parsed.unitMetric !== "ml") return parsed;
+  const explicitVolumeUnit = canonicalVolumeUnit(parsed.unit);
+  const autoConvertLiquidVolume = !!explicitVolumeUnit && isLikelyLiquidIngredient(parsed.name);
+  if (!preferWeight && !autoConvertLiquidVolume) return parsed;
   const density = estimateIngredientDensityGPerMl(parsed.name);
   if (!Number.isFinite(density) || density <= 0) return parsed;
-  const grams = Number((Number(parsed.amountMetric || 0) * density).toFixed(2));
+  const grams = Math.round(Number(parsed.amountMetric || 0) * density);
   if (!Number.isFinite(grams) || grams <= 0) return parsed;
   return {
     ...parsed,
@@ -843,7 +850,7 @@ function formatIngredientLineFromParsed(
   const prep = normalizeSingleLineText(effective.preparation || "");
   let amount = "";
   let unit = "";
-  const usingWeightMetric = preferWeight && effective.unitMetric === "g" && parsed.unitMetric === "ml";
+  const usingWeightMetric = effective.unitMetric === "g" && parsed.unitMetric === "ml";
 
   if (!effective.quantityUnknown) {
     if (metricMode || usingWeightMetric) {
