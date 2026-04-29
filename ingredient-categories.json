@@ -1,12 +1,12 @@
 {
   "categoryOrder": [
-    "Cheese",
-    "Fresh Fruit and Vegetables",
-    "Pantry Staples",
-    "Protein",
-    "Spices and Seasoning",
-    "Dairy and Refrigerated",
     "Bakery",
+    "Spices and Seasoning",
+    "Pantry Staples",
+    "Fresh Fruit and Vegetables",
+    "Protein",
+    "Cheese",
+    "Dairy and Refrigerated",
     "Frozen",
     "Other"
   ],
@@ -125,7 +125,7 @@
     "flour": "Pantry Staples",
     "canned": "Pantry Staples",
     "puree": "Pantry Staples",
-    "purée": "Pantry Staples",
+    "pur e": "Pantry Staples",
     "stock": "Pantry Staples",
     "broth": "Pantry Staples",
     "seed": "Pantry Staples",

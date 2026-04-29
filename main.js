@@ -4620,60 +4620,8 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     const { body: mealPrepBody } = this.buildFoldableSection(containerEl, {
       stateKey: "mealPrepSetupCollapsed",
       title: "Meal-prep setup",
-      description: "Canvas paths, naming, and shopping-list behavior.",
+      description: "Shopping-list output behavior and quick override controls.",
     });
-
-    new Setting(mealPrepBody)
-      .setName("Weekly meal-plan canvas")
-      .setDesc("Canvas file used for recipe aggregation when no canvas is currently open.")
-      .addText((text) =>
-        text
-          .setPlaceholder("Utility/⛑️ Weekly Meal Plan.canvas")
-          .setValue(this.plugin.settings.weeklyCanvasPath)
-          .onChange(async (value) => {
-            this.plugin.settings.weeklyCanvasPath = value.trim();
-              await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(mealPrepBody)
-      .setName("Meal-prep canvas folder")
-      .setDesc("Target folder used by the 'Create weekly meal-prep canvas' command.")
-      .addText((text) =>
-        text
-          .setPlaceholder("Utility")
-          .setValue(this.plugin.settings.mealPrepCanvasFolder || "Utility")
-          .onChange(async (value) => {
-            this.plugin.settings.mealPrepCanvasFolder = value.trim() || "Utility";
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(mealPrepBody)
-      .setName("Meal-prep canvas name template")
-      .setDesc("Use {{week}}, {{year}}, {{weekPadded}}, or {{date}}. Example: ⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas")
-      .addText((text) =>
-        text
-          .setPlaceholder("⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas")
-          .setValue(this.plugin.settings.mealPrepCanvasNameTemplate || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate)
-          .onChange(async (value) => {
-            this.plugin.settings.mealPrepCanvasNameTemplate = value.trim() || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(mealPrepBody)
-      .setName("Shopping list output note")
-      .setDesc("Markdown note path that will be overwritten each generation.")
-      .addText((text) =>
-        text
-          .setPlaceholder("Utility/🛒 Weekly Shopping List.md")
-          .setValue(this.plugin.settings.shoppingListOutputPath)
-          .onChange(async (value) => {
-            this.plugin.settings.shoppingListOutputPath = value.trim();
-              await this.plugin.saveSettings();
-          })
-      );
 
     new Setting(mealPrepBody)
       .setName("Show category reason in shopping list")
@@ -5045,6 +4993,58 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       title: "First-Time Setup",
       description: "The setup popup saves both vault locations and populates both editable templates from the bundled plugin base.",
     });
+
+    new Setting(firstTimeSetupBody)
+      .setName("Weekly meal-plan canvas")
+      .setDesc("Canvas file used for recipe aggregation when no canvas is currently open.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Utility/⛑️ Weekly Meal Plan.canvas")
+          .setValue(this.plugin.settings.weeklyCanvasPath)
+          .onChange(async (value) => {
+            this.plugin.settings.weeklyCanvasPath = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(firstTimeSetupBody)
+      .setName("Meal-prep canvas folder")
+      .setDesc("Target folder used by the 'Create weekly meal-prep canvas' command.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Utility")
+          .setValue(this.plugin.settings.mealPrepCanvasFolder || "Utility")
+          .onChange(async (value) => {
+            this.plugin.settings.mealPrepCanvasFolder = value.trim() || "Utility";
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(firstTimeSetupBody)
+      .setName("Meal-prep canvas name template")
+      .setDesc("Use {{week}}, {{year}}, {{weekPadded}}, or {{date}}. Example: ⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas")
+      .addText((text) =>
+        text
+          .setPlaceholder("⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas")
+          .setValue(this.plugin.settings.mealPrepCanvasNameTemplate || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate)
+          .onChange(async (value) => {
+            this.plugin.settings.mealPrepCanvasNameTemplate = value.trim() || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(firstTimeSetupBody)
+      .setName("Shopping list output note")
+      .setDesc("Markdown note path that will be overwritten each generation.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Utility/🛒 Weekly Shopping List.md")
+          .setValue(this.plugin.settings.shoppingListOutputPath)
+          .onChange(async (value) => {
+            this.plugin.settings.shoppingListOutputPath = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
 
     new Setting(firstTimeSetupBody)
       .setName("Run setup")
