@@ -1,6 +1,6 @@
 # Weekly Meal Shopper
 
-Weekly Meal Shopper standardizes recipe notes, parses ingredient metadata, and generates a categorized shopping checklist from a meal-plan canvas.
+Weekly Meal Shopper standardizes recipe notes, parses ingredient metadata, creates weekly meal-prep canvases, and generates categorized shopping lists from those canvases.
 
 The plugin ships with its own private starter templates inside the plugin folder. You do not need to configure Obsidian's Templates core plugin to use the recipe note or meal-prep canvas commands.
 
@@ -24,6 +24,17 @@ After that, the normal workflow is:
 3. Add recipe file cards to the weekly canvas.
 4. Run `Generate weekly shopping list from meal-plan canvas`.
 
+## Recipe Creation Workflow
+
+1. Set `Recipe folder` and `Transcribe recipes from image folder`.
+2. Use `Create recipe note from template` whenever you want a blank recipe note from your editable recipe template.
+3. Use `Transcribe recipe from URL entry (website/YouTube)` when you want the plugin to turn a recipe page or video link into a recipe note.
+4. Use `Transcribe recipes from image folder` when you want to batch-convert recipe screenshots or photos from your configured inbox folder.
+5. URL and image transcription both save into the same `Recipe folder`.
+6. Open the created recipe note and run `Standardize current recipe format` or `Populate ingredient metadata from recipe section` if you want to refresh formatting or parsed ingredient data manually.
+
+Supported image inbox formats for folder transcription include `jpg/jpeg`, `png`, `webp`, `gif`, `bmp`, `heic/heif` (Apple Photos), `tif/tiff`, and `avif`.
+
 ## Commands
 
 - Open recipe view in current tab
@@ -40,7 +51,10 @@ After that, the normal workflow is:
 - Apply frozen leftovers from meal-plan canvas
 - Show frozen portions available
 
-Plugin-owned template files:
+## Template Files
+
+Plugin-owned bundled template files:
+
 - `.obsidian/plugins/weekly-meal-shopper/templates/recipe-template.md`
 - `.obsidian/plugins/weekly-meal-shopper/templates/meal-prep-canvas-template.canvas`
 
@@ -50,7 +64,7 @@ On a fresh install, these files are already present in the plugin. `Run First-Ti
 
 1. Open plugin settings and run `Run First-Time Setup`.
 2. Choose where the editable recipe template and editable meal-prep canvas template should live in your vault.
-3. Set `Recipe folder`, `Transcribe recipes from image folder`, `Transcription output recipe folder`, and `Weekly meal-plan canvas`.
+3. Set `Recipe folder`, `Transcribe recipes from image folder`, and `Weekly meal-plan canvas`.
 4. Run `Create weekly meal-prep canvas`.
 5. Run `Create recipe note from template` whenever you want a new recipe note.
 6. Open your canvas and place recipe file cards.
@@ -62,74 +76,60 @@ Supported image inbox formats for folder transcription include `jpg/jpeg`, `png`
 
 1. Open plugin settings and run `Run First-Time Setup`.
 2. Choose where the editable recipe template and editable meal-prep canvas template should live in your vault.
-3. Use the recipe and meal-prep features you want to use. The plugin now runs as one combined workflow, so there are no separate Basic or Meal Prep toggles to enable.
-4. Set `Recipe folder`, `Transcribe recipes from image folder`, `Transcription output recipe folder`, and `Weekly meal-plan canvas`.
-5. Run `Create weekly meal-prep canvas`.
-6. Run `Create recipe note from template` whenever you want a new recipe note.
-7. Open your canvas and place recipe file cards.
-8. Run `Generate weekly shopping list from meal-plan canvas`.
+3. Set `Recipe folder`, `Transcribe recipes from image folder`, and `Weekly meal-plan canvas`. URL/image transcription saves into the same `Recipe folder`.
+4. Run `Create weekly meal-prep canvas`.
+5. Run `Create recipe note from template` whenever you want a new recipe note.
+6. Open your canvas and place recipe file cards.
+7. Run `Generate weekly shopping list from meal-plan canvas`.
 
 Supported image inbox formats for folder transcription include `jpg/jpeg`, `png`, `webp`, `gif`, `bmp`, `heic/heif` (Apple Photos), `tif/tiff`, and `avif`.
 
 ## Recipe Parsing + Formatting
 
 - Ingredients are parsed from the `### Ingredients` section.
-- Parsed ingredient metadata is written to frontmatter field `IngredientsParsed` (configurable).
-- Ingredient formatting is configurable via template placeholders:
-  - `{{Amount}} {{Unit}} {{Ingredient}} {{Preparation}} {{PreparationSuffix}}`
+- Parsed ingredient metadata is written to the frontmatter field `IngredientsParsed` by default.
+- Ingredient formatting is configurable via template placeholders such as `{{Amount}}`, `{{Unit}}`, `{{Ingredient}}`, `{{Preparation}}`, and `{{PreparationSuffix}}`.
 - Measurement presets include Vault Standard, Australian, US Customary, and custom mL values.
 - Preference toggle supports weight-first conversion (`g` where density rules are available).
+- Standardization keeps `type: Recipe`, fills in the expected recipe frontmatter fields, and normalizes the main recipe sections.
 
 ## Recipe View
 
-- Split-pane recipe mode in current tab.
+- Split-pane recipe mode opens in the current tab.
 - Left pane: ingredients with click-to-cross-off state.
 - Right pane: directions with step focus box and Vim navigation (`j/k`, arrows).
-- Subheading sync across `####` sections between ingredients and directions.
+- Subheading sync works across matching `####` sections between ingredients and directions.
+- Ingredient highlighting can bold ingredients mentioned in the active step and visually sync matching ingredient groups.
 
-## Shopping List Explainability
+## Shopping Lists + Meal Prep
 
-Shopping list output supports:
+- Weekly shopping lists are generated from recipe cards on your active or configured meal-plan canvas.
+- Ingredient totals are aggregated across the canvas and grouped into shopping categories.
+- Excluded ingredients and ingredient overrides can change what appears on the final shopping list.
+- Frozen portions can be projected, inspected, and applied back to recipes through the meal-prep commands.
+- Optional shopping-list annotations can show category reasons and one-click override links.
 
-- Category reason annotations (`why: ...`).
-- One-click `Override` link per line (opens override command using current line).
+## Config Files
 
-## Config Files (Extensibility Hooks)
+The plugin maintains a few editable JSON rule libraries inside the plugin folder:
 
-- Ingredient category rules:
-  - `.obsidian/plugins/weekly-meal-shopper/ingredient-categories.json`
-- Unit-density conversion rules:
-  - `.obsidian/plugins/weekly-meal-shopper/unit-density-rules.json`
-- Unit alias rules:
-  - `.obsidian/plugins/weekly-meal-shopper/unit-aliases.json`
+- `.obsidian/plugins/weekly-meal-shopper/ingredient-categories.json`
+- `.obsidian/plugins/weekly-meal-shopper/unit-density-rules.json`
+- `.obsidian/plugins/weekly-meal-shopper/unit-aliases.json`
+
+These support shopping categorization, density-based unit conversion, and extra unit aliases.
 
 ## Safety + Reliability
 
-- Transcription API requests include retry/backoff for rate limits/server errors.
-- URL transcription creates a fallback recipe template if transcription fails.
-- Parsed ingredient metadata is cached by file mtime/size to avoid unnecessary re-parsing.
-
-## Publish Assets (recommended)
-
-- GIF 1: recipe split-view walkthrough
-- GIF 2: shopping list generation from canvas
-- GIF 3: URL transcription into template
-
-Reference pack:
-- `docs/demos/README.md`
+- Transcription API requests include retry/backoff handling for rate limits and transient server errors.
+- If URL transcription fails, the plugin can still create a fallback recipe note so you do not lose the source link and extracted context.
+- Parsed ingredient metadata is cached by file signature to avoid unnecessary re-parsing.
+- Stored API key usage is optional; you can rely on `OPENAI_API_KEY` instead if preferred.
 
 ## Compatibility
 
 - Plugin `minAppVersion`: `0.15.0`
 - Desktop + mobile compatible (`isDesktopOnly: false`)
-
-For release planning, see:
-
-- `ROADMAP.md`
-- `RELEASE_CHECKLIST.md`
-- `CHANGELOG.md`
-- `MIGRATION_NOTES.md`
-- `TEST_PLAN.md`
 
 ## Tests
 
@@ -140,7 +140,12 @@ npm test
 ```
 
 Fixture-backed coverage currently includes:
-- ingredient parsing + direction bolding regressions
+
+- recipe template creation and first-time setup flows
+- ingredient parsing and direction-highlighting regressions
 - AU/US unit conversion behavior
-- `####` section-sync grouping behavior
-- shopping categorization regressions
+- weekly meal-prep canvas creation and naming
+- shopping categorization and category-order helpers
+- transcription API key handling
+
+

@@ -18,7 +18,6 @@ const DEFAULT_SETTINGS = {
   mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas",
   shoppingListOutputPath: "Utility/🛒 Weekly Shopping List.md",
   recipeFolder: "pages/Food and Drink/Recipes",
-  transcriptionOutputFolder: "pages/Food and Drink/Recipes",
   measurementPreset: "vault_standard",
   measurementPreference: "weight",
   cupMl: 250,
@@ -2373,9 +2372,10 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.mealPrepCanvasTemplateVaultPath = String(
       this.settings.mealPrepCanvasTemplateVaultPath || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath
     ).trim() || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath;
-    this.settings.transcriptionOutputFolder = String(
-      this.settings.transcriptionOutputFolder || this.settings.recipeFolder || "pages/Food and Drink/Recipes"
+    this.settings.recipeFolder = String(
+      this.settings.recipeFolder || this.settings.transcriptionOutputFolder || "pages/Food and Drink/Recipes"
     ).trim() || "pages/Food and Drink/Recipes";
+    delete this.settings.transcriptionOutputFolder;
     this.settings.measurementPreset = String(this.settings.measurementPreset || "vault_standard").trim().toLowerCase();
     if (
       !Object.prototype.hasOwnProperty.call(MEASUREMENT_PRESETS, this.settings.measurementPreset)
@@ -2427,6 +2427,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     delete this.settings.workflowPreset;
     delete this.settings.featureBasicEnabled;
     delete this.settings.featureMealPrepEnabled;
+    delete this.settings.transcriptionOutputFolder;
     if (this.settings.settingsSectionState && typeof this.settings.settingsSectionState === "object") {
       delete this.settings.settingsSectionState.workflowModeCollapsed;
     }
@@ -2766,9 +2767,7 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   getRecipeTemplateFolder() {
-    return normalizePath(
-      this.settings.recipeFolder || this.settings.transcriptionOutputFolder || "pages/Food and Drink/Recipes"
-    );
+    return normalizePath(this.settings.recipeFolder || "pages/Food and Drink/Recipes");
   }
 
   buildUniqueVaultFilePath(folder, baseName, extension = "md") {
@@ -3148,9 +3147,7 @@ class WeeklyMealShopperPlugin extends Plugin {
       notes: normalizeStringArray(normalized.notes),
     };
 
-    const folder = normalizePath(
-      this.settings.transcriptionOutputFolder || this.settings.recipeFolder || "pages/Food and Drink/Recipes"
-    );
+    const folder = normalizePath(this.settings.recipeFolder || "pages/Food and Drink/Recipes");
     await this.ensureFolderPathExists(folder);
     const baseName = this.sanitizeRecipeFilename(noteRecipe.title);
     const outputPath = this.buildUniqueVaultFilePath(folder, baseName, "md");
@@ -4721,7 +4718,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
     new Setting(recipeSetupBody)
       .setName("Recipe folder")
-      .setDesc("Used by the batch standardization command (and as fallback output path).")
+      .setDesc("Used for recipe creation, transcription output, and batch standardization.")
       .addText((text) =>
         text
           .setPlaceholder("pages/Food and Drink/Recipes")
@@ -4933,21 +4930,6 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.transcriptionMetricOutput === false ? "source" : "metric")
           .onChange(async (value) => {
             this.plugin.settings.transcriptionMetricOutput = value !== "source";
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(transcriptionBody)
-      .setName("Transcription output recipe folder")
-      .setDesc("Where new recipe notes are created by URL/image transcription.")
-      .addText((text) =>
-        text
-          .setPlaceholder("pages/Food and Drink/Recipes")
-          .setValue(
-            this.plugin.settings.transcriptionOutputFolder || this.plugin.settings.recipeFolder || "pages/Food and Drink/Recipes"
-          )
-          .onChange(async (value) => {
-            this.plugin.settings.transcriptionOutputFolder = value.trim() || "pages/Food and Drink/Recipes";
             await this.plugin.saveSettings();
           })
       );

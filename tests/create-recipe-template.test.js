@@ -19,7 +19,6 @@ test("createRecipeFromTemplate creates a duplicate-safe recipe note from the har
 
   plugin.settings = {
     recipeFolder: "pages",
-    transcriptionOutputFolder: "pages/Food and Drink/Recipes",
     recipeTemplateVaultPath: "Templates/Weekly Meal Shopper/Recipe Template.md",
   };
   plugin.promptTextEntry = async () => ({ value: "My Pasta" });

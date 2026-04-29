@@ -41,6 +41,19 @@ test("loadSettings seeds fresh installs with default excluded pantry ingredients
   );
 });
 
+test("loadSettings folds legacy transcription output folder into recipeFolder", async () => {
+  const plugin = new PluginClass();
+  plugin.loadData = async () => ({
+    recipeFolder: "",
+    transcriptionOutputFolder: "pages/Imported Recipes",
+  });
+
+  await plugin.loadSettings();
+
+  assert.equal(plugin.settings.recipeFolder, "pages/Imported Recipes");
+  assert.equal("transcriptionOutputFolder" in plugin.settings, false);
+});
+
 test("saveSettings strips legacy mode flags from persisted settings", async () => {
   const plugin = new PluginClass();
   let saved = null;
@@ -49,6 +62,7 @@ test("saveSettings strips legacy mode flags from persisted settings", async () =
     workflowPreset: "balanced",
     featureBasicEnabled: true,
     featureMealPrepEnabled: true,
+    transcriptionOutputFolder: "pages/Imported Recipes",
     settingsSectionState: {
       workflowModeCollapsed: true,
       firstTimeSetupCollapsed: false,
@@ -72,6 +86,7 @@ test("saveSettings strips legacy mode flags from persisted settings", async () =
   assert.equal("workflowPreset" in saved, false);
   assert.equal("featureBasicEnabled" in saved, false);
   assert.equal("featureMealPrepEnabled" in saved, false);
+  assert.equal("transcriptionOutputFolder" in saved, false);
   assert.equal("workflowModeCollapsed" in saved.settingsSectionState, false);
 });
 
