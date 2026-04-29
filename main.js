@@ -13,9 +13,6 @@ const {
 } = require("obsidian");
 
 const DEFAULT_SETTINGS = {
-  workflowPreset: "balanced",
-  featureBasicEnabled: true,
-  featureMealPrepEnabled: true,
   weeklyCanvasPath: "Utility/⛑️ Weekly Meal Plan.canvas",
   mealPrepCanvasFolder: "Utility",
   mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas",
@@ -50,7 +47,6 @@ const DEFAULT_SETTINGS = {
   includeOverrideLinksInShoppingList: false,
   settingsImportExportPath: ".obsidian/plugins/weekly-meal-shopper/settings-export.json",
   settingsSectionState: {
-    workflowModeCollapsed: false,
     firstTimeSetupCollapsed: false,
     mealPrepSetupCollapsed: false,
     recipeSetupCollapsed: false,
@@ -2200,7 +2196,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "open-recipe-view-in-current-tab",
       name: "Open recipe view in current tab",
       callback: async () => {
-        if (!this.requireFeatureEnabled("basic", "Recipe view")) return;
         await this.openRecipeViewInCurrentTab();
       },
     });
@@ -2209,7 +2204,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "create-recipe-note-from-template",
       name: "Create recipe note from template",
       callback: async () => {
-        if (!this.requireFeatureEnabled("basic", "Recipe template creation")) return;
         await this.createRecipeFromTemplate();
       },
     });
@@ -2234,7 +2228,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "set-active-canvas-as-weekly-plan",
       name: "Set active canvas as weekly meal plan",
       checkCallback: (checking) => {
-        if (!this.isFeatureEnabled("meal prep")) return false;
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "canvas") return false;
         if (!checking) {
@@ -2250,7 +2243,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "standardize-current-recipe-format",
       name: "Standardize current recipe format",
       callback: async () => {
-        if (!this.requireFeatureEnabled("basic", "Recipe standardization")) return;
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "md") {
           new Notice("Open a recipe markdown file first.");
@@ -2264,7 +2256,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "standardize-recipe-formats-in-folder",
       name: "Standardize recipe formats in configured folder",
       callback: async () => {
-        if (!this.requireFeatureEnabled("basic", "Recipe standardization")) return;
         const normalizedFolder = normalizePath(this.settings.recipeFolder);
         const recipeFiles = this.app.vault
           .getMarkdownFiles()
@@ -2285,7 +2276,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "populate-recipe-ingredient-metadata",
       name: "Populate ingredient metadata from recipe section",
       callback: async () => {
-        if (!this.requireFeatureEnabled("basic", "Ingredient parsing")) return;
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "md") {
           new Notice("Open a recipe markdown file first.");
@@ -2305,7 +2295,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "generate-weekly-shopping-list-from-canvas",
       name: "Generate weekly shopping list from meal-plan canvas",
       callback: async () => {
-        if (!this.requireFeatureEnabled("meal prep", "Shopping list generation")) return;
         await this.generateWeeklyShoppingList({ applyFrozenInventory: false });
       },
     });
@@ -2314,7 +2303,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "apply-frozen-leftovers-from-canvas",
       name: "Apply frozen leftovers from meal-plan canvas",
       callback: async () => {
-        if (!this.requireFeatureEnabled("meal prep", "Frozen leftovers update")) return;
         await this.generateWeeklyShoppingList({ applyFrozenInventory: true });
       },
     });
@@ -2323,7 +2311,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "show-frozen-portions-available",
       name: "Show frozen portions available",
       callback: async () => {
-        if (!this.requireFeatureEnabled("meal prep", "Frozen portions inventory")) return;
         await this.showFrozenPortionsAvailable();
       },
     });
@@ -2332,7 +2319,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "create-weekly-meal-prep-canvas",
       name: "Create weekly meal-prep canvas",
       callback: async () => {
-        if (!this.requireFeatureEnabled("meal prep", "Meal-prep canvas creation")) return;
         await this.createWeeklyMealPrepCanvas();
       },
     });
@@ -2341,7 +2327,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "transcribe-recipe-from-url-entry",
       name: "Transcribe recipe from URL entry (website/YouTube)",
       callback: async () => {
-        if (!this.requireFeatureEnabled("basic", "Recipe transcription")) return;
         await this.transcribeRecipeFromUrlEntry();
       },
     });
@@ -2350,7 +2335,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "transcribe-recipes-from-image-folder",
       name: "Transcribe recipes from image folder",
       callback: async () => {
-        if (!this.requireFeatureEnabled("basic", "Recipe transcription")) return;
         await this.transcribeRecipesFromImageFolder();
       },
     });
@@ -2359,7 +2343,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       id: "add-ingredient-override-from-current-shopping-line",
       name: "Add ingredient override from current shopping list line",
       callback: async () => {
-        if (!this.requireFeatureEnabled("meal prep", "Ingredient override")) return;
         await this.addIngredientOverrideFromCurrentShoppingLine();
       },
     });
@@ -2372,10 +2355,9 @@ class WeeklyMealShopperPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    const preset = normalizeSearchText(this.settings.workflowPreset || "balanced");
-    this.settings.workflowPreset = ["balanced", "basic_only", "meal_prep"].includes(preset) ? preset : "balanced";
-    this.settings.featureBasicEnabled = this.settings.featureBasicEnabled !== false;
-    this.settings.featureMealPrepEnabled = this.settings.featureMealPrepEnabled !== false;
+    delete this.settings.workflowPreset;
+    delete this.settings.featureBasicEnabled;
+    delete this.settings.featureMealPrepEnabled;
     this.settings.excludedIngredientsExact = normalizeExactExclusionList(this.settings.excludedIngredientsExact);
     this.settings.ingredientOverrides = normalizeExactExclusionList(this.settings.ingredientOverrides);
     this.settings.mealPrepCanvasFolder = String(this.settings.mealPrepCanvasFolder || "Utility").trim() || "Utility";
@@ -2421,7 +2403,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       ? this.settings.settingsSectionState
       : {};
     this.settings.settingsSectionState = {
-      workflowModeCollapsed: !!sectionState.workflowModeCollapsed,
       firstTimeSetupCollapsed: !!sectionState.firstTimeSetupCollapsed,
       mealPrepSetupCollapsed: !!sectionState.mealPrepSetupCollapsed,
       recipeSetupCollapsed: !!sectionState.recipeSetupCollapsed,
@@ -2443,55 +2424,15 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   async saveSettings() {
+    delete this.settings.workflowPreset;
+    delete this.settings.featureBasicEnabled;
+    delete this.settings.featureMealPrepEnabled;
+    if (this.settings.settingsSectionState && typeof this.settings.settingsSectionState === "object") {
+      delete this.settings.settingsSectionState.workflowModeCollapsed;
+    }
     setActiveMeasurementProfile(this.settings);
     setActiveIngredientLineTemplate(this.settings.ingredientLineTemplate);
     await this.saveData(this.settings);
-  }
-
-  async applyWorkflowPreset(presetKey) {
-    const key = normalizeSearchText(presetKey || "balanced");
-    if (key === "basic only" || key === "basic-only") return this.applyWorkflowPreset("basic_only");
-    if (key === "meal prep" || key === "meal-prep") return this.applyWorkflowPreset("meal_prep");
-
-    if (key === "basic_only") {
-      this.settings.workflowPreset = "basic_only";
-      this.settings.featureBasicEnabled = true;
-      this.settings.featureMealPrepEnabled = false;
-      this.settings.showCategoryReasonsInShoppingList = false;
-      this.settings.includeOverrideLinksInShoppingList = false;
-      await this.saveSettings();
-      return;
-    }
-
-    if (key === "meal_prep") {
-      this.settings.workflowPreset = "meal_prep";
-      this.settings.featureBasicEnabled = true;
-      this.settings.featureMealPrepEnabled = true;
-      this.settings.showCategoryReasonsInShoppingList = true;
-      this.settings.includeOverrideLinksInShoppingList = false;
-      await this.saveSettings();
-      return;
-    }
-
-    this.settings.workflowPreset = "balanced";
-    this.settings.featureBasicEnabled = true;
-    this.settings.featureMealPrepEnabled = true;
-    this.settings.showCategoryReasonsInShoppingList = true;
-    this.settings.includeOverrideLinksInShoppingList = false;
-    await this.saveSettings();
-  }
-
-  isFeatureEnabled(featureKey) {
-    const key = normalizeSearchText(featureKey);
-    if (key === "mealprep" || key === "meal prep") return this.settings.featureMealPrepEnabled !== false;
-    if (key === "basic") return this.settings.featureBasicEnabled !== false;
-    return true;
-  }
-
-  requireFeatureEnabled(featureKey, actionLabel = "This action") {
-    if (this.isFeatureEnabled(featureKey)) return true;
-    new Notice(`${actionLabel} is disabled in Weekly Meal Shopper settings.`);
-    return false;
   }
 
   getCommandUri(commandId) {
@@ -3163,7 +3104,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       "FrozenPortionsAvailable: 0",
       "UseFrozenFirst: true",
       "type: Recipe",
-      "Class: Recipe",
       "FoodType: Meal Item",
       "Collection: []",
       `Cover: ${yamlQuoted(recipe.cover || "")}`,
@@ -3244,7 +3184,6 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   async transcribeRecipeFromUrlEntry() {
-    if (!this.requireFeatureEnabled("basic", "Recipe transcription")) return;
     const result = await this.promptTextEntry({
       title: "Transcribe Recipe from Link",
       label: "Website or YouTube URL",
@@ -3300,7 +3239,6 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   async transcribeRecipesFromImageFolder() {
-    if (!this.requireFeatureEnabled("basic", "Recipe transcription")) return;
     const folderPath = normalizePath(this.settings.transcriptionImageFolder || "");
     if (!folderPath) {
       new Notice("Set an image folder path in plugin settings first.");
@@ -3919,7 +3857,6 @@ class WeeklyMealShopperPlugin extends Plugin {
   async saveParsedIngredientsToFrontmatter(file, parsedIngredients) {
     const field = this.settings.parsedIngredientsField;
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      frontmatter.Class = frontmatter.Class || "Recipe";
       frontmatter.type = frontmatter.type || "Recipe";
       frontmatter[field] = parsedIngredients.map((item) => ({
         name: item.name,
@@ -3954,7 +3891,8 @@ class WeeklyMealShopperPlugin extends Plugin {
       frontmatter.FrozenPortionsAvailable = frontmatter.FrozenPortionsAvailable ?? 0;
       frontmatter.UseFrozenFirst = frontmatter.UseFrozenFirst ?? true;
       frontmatter.type = "Recipe";
-      frontmatter.Class = "Recipe";
+      delete frontmatter.Class;
+      delete frontmatter.class;
       frontmatter.FoodType = frontmatter.FoodType ?? "Meal Item";
       frontmatter.Collection = frontmatter.Collection ?? [];
       frontmatter.Cover = frontmatter.Cover ?? "";
@@ -4115,7 +4053,6 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   async showFrozenPortionsAvailable() {
-    if (!this.requireFeatureEnabled("meal prep", "Frozen portions inventory")) return;
     const allRecipes = this.app.vault.getMarkdownFiles().filter((file) => this.isRecipeFile(file));
     let withFrozenCount = 0;
 
@@ -4247,7 +4184,6 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   async generateWeeklyShoppingList({ applyFrozenInventory = false } = {}) {
-    if (!this.requireFeatureEnabled("meal prep", "Shopping list generation")) return;
     const active = this.app.workspace.getActiveFile();
     let canvasFile = null;
 
@@ -5065,7 +5001,6 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       .setDesc("Process all image files in the configured folder and create recipe notes.")
       .addButton((btn) =>
         btn.setButtonText("Transcribe Folder Images").setCta().onClick(async () => {
-          if (!this.plugin.requireFeatureEnabled("basic", "Recipe transcription")) return;
           await this.plugin.transcribeRecipesFromImageFolder();
         })
       );
@@ -5123,58 +5058,6 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     this.renderShoppingCategoriesSection(containerEl, categoryConfig);
     this.renderExcludedIngredientsSection(containerEl, categories);
     this.renderIngredientOverridesSection(containerEl, categories);
-
-    const { body: workflowBody } = this.buildFoldableSection(containerEl, {
-      stateKey: "workflowModeCollapsed",
-      title: "Workflow + modes",
-      description: "Core feature toggles and preset profiles for the plugin surface area.",
-    });
-
-    new Setting(workflowBody)
-      .setName("Basic mode features")
-      .setDesc("Recipe view, parse ingredients, and URL/image transcription commands.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.featureBasicEnabled !== false)
-          .onChange(async (value) => {
-            this.plugin.settings.featureBasicEnabled = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(workflowBody)
-      .setName("Meal Prep mode features")
-      .setDesc("Canvas-driven shopping list, frozen portions, and meal-prep canvas commands.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.featureMealPrepEnabled !== false)
-          .onChange(async (value) => {
-            this.plugin.settings.featureMealPrepEnabled = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    let selectedPreset = this.plugin.settings.workflowPreset || "balanced";
-    new Setting(workflowBody)
-      .setName("Workflow preset")
-      .setDesc("Apply a pre-configured mode profile for common publishing scenarios.")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("balanced", "Balanced (recommended)")
-          .addOption("basic_only", "Basic only")
-          .addOption("meal_prep", "Meal Prep")
-          .setValue(selectedPreset)
-          .onChange((value) => {
-            selectedPreset = value;
-          })
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Apply preset").onClick(async () => {
-          await this.plugin.applyWorkflowPreset(selectedPreset);
-          new Notice(`Applied workflow preset: ${selectedPreset}.`);
-          await this.display();
-        })
-      );
 
     this.renderCategoryHeading(containerEl, {
       title: "First-Time Setup",

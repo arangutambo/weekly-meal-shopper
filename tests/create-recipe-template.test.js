@@ -1,3 +1,5 @@
+const fs = require("node:fs");
+const path = require("node:path");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -132,4 +134,103 @@ test("runFirstTimeTemplateSetup saves both template paths and populates both edi
     canvasFile: { path: "Templates/Setup/Canvas.canvas" },
     recipeFile: { path: "Templates/Setup/Recipe.md" },
   });
+});
+
+test("bundled recipe template no longer includes a Class frontmatter field", () => {
+  const templatePath = path.resolve(__dirname, "..", "templates", "recipe-template.md");
+  const content = fs.readFileSync(templatePath, "utf8");
+
+  assert.equal(/\nClass:\s*Recipe\b/.test(content), false);
+  assert.equal(/\ntype:\s*Recipe\b/.test(content), true);
+});
+
+test("buildTranscribedRecipeNoteContent omits the Class frontmatter field", () => {
+  const plugin = new PluginClass();
+
+  const content = plugin.buildTranscribedRecipeNoteContent({
+    ingredients: ["1 cup flour"],
+    directions: ["Mix everything."],
+    notes: [],
+    cookTime: "",
+    prepTime: "",
+    portions: "",
+    cover: "",
+    link: "",
+  });
+
+  assert.equal(content.includes("Class: Recipe"), false);
+  assert.equal(content.includes("type: Recipe"), true);
+});
+
+test("standardizeRecipeFile removes the Class frontmatter field from existing notes", async () => {
+  const plugin = new PluginClass();
+  let content = [
+    "---",
+    "Class: Recipe",
+    "type: Recipe",
+    "---",
+    "### Ingredients",
+    "- 1 cup flour",
+    "---",
+    "### Directions",
+    "1. Mix everything.",
+    "",
+  ].join("\n");
+
+  const parseFrontmatterBlock = (source) => {
+    const match = source.match(/^---\n([\s\S]*?)\n---\n?/);
+    if (!match) return {};
+    const out = {};
+    for (const line of match[1].split("\n")) {
+      const idx = line.indexOf(":");
+      if (idx === -1) continue;
+      const key = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      out[key] = value;
+    }
+    return out;
+  };
+
+  const serializeFrontmatterBlock = (frontmatter) => {
+    const lines = [];
+    for (const [key, value] of Object.entries(frontmatter)) {
+      if (Array.isArray(value)) {
+        if (value.length === 0) {
+          lines.push(`${key}: []`);
+          continue;
+        }
+        lines.push(`${key}:`);
+        for (const item of value) lines.push(`  - ${item}`);
+        continue;
+      }
+      lines.push(`${key}: ${value}`);
+    }
+    return `---\n${lines.join("\n")}\n---`;
+  };
+
+  plugin.settings = {
+    parsedIngredientsField: "IngredientsParsed",
+  };
+  plugin.app = {
+    vault: {
+      read: async () => content,
+      modify: async (_file, nextContent) => {
+        content = nextContent;
+      },
+    },
+    fileManager: {
+      processFrontMatter: async (_file, updater) => {
+        const frontmatter = parseFrontmatterBlock(content);
+        updater(frontmatter);
+        const body = content.replace(/^---\n[\s\S]*?\n---\n?/, "");
+        content = `${serializeFrontmatterBlock(frontmatter)}\n${body}`;
+      },
+    },
+  };
+
+  const changed = await plugin.standardizeRecipeFile({ path: "pages/Test Recipe.md" });
+
+  assert.equal(changed, true);
+  assert.equal(content.includes("Class: Recipe"), false);
+  assert.equal(content.includes("\ntype: Recipe"), true);
 });

@@ -14,7 +14,6 @@ PortionsPerMeal: 1
 FrozenPortionsAvailable: 0
 UseFrozenFirst: true
 type: Recipe
-Class: Recipe
 FoodType: Meal Item
 Collection: []
 Cover: 

@@ -24,13 +24,6 @@ After that, the normal workflow is:
 3. Add recipe file cards to the weekly canvas.
 4. Run `Generate weekly shopping list from meal-plan canvas`.
 
-## Modes
-
-- Basic: recipe view, ingredient parsing/standardization, URL + image transcription into recipe templates.
-- Meal Prep: weekly canvas workflows, shopping list generation, frozen portions inventory/projection, meal-prep canvas creation.
-
-Each mode can be toggled in plugin settings, and presets are available for quick switching (`Balanced`, `Basic only`, `Meal Prep`).
-
 ## Commands
 
 - Open recipe view in current tab
@@ -57,12 +50,11 @@ On a fresh install, these files are already present in the plugin. `Run First-Ti
 
 1. Open plugin settings and run `Run First-Time Setup`.
 2. Choose where the editable recipe template and editable meal-prep canvas template should live in your vault.
-3. Enable the `Basic` and `Meal Prep` features you want to use.
-4. Set `Recipe folder`, `Transcribe recipes from image folder`, `Transcription output recipe folder`, and `Weekly meal-plan canvas`.
-5. Run `Create weekly meal-prep canvas`.
-6. Run `Create recipe note from template` whenever you want a new recipe note.
-7. Open your canvas and place recipe file cards.
-8. Run `Generate weekly shopping list from meal-plan canvas`.
+3. Set `Recipe folder`, `Transcribe recipes from image folder`, `Transcription output recipe folder`, and `Weekly meal-plan canvas`.
+4. Run `Create weekly meal-prep canvas`.
+5. Run `Create recipe note from template` whenever you want a new recipe note.
+6. Open your canvas and place recipe file cards.
+7. Run `Generate weekly shopping list from meal-plan canvas`.
 
 Supported image inbox formats for folder transcription include `jpg/jpeg`, `png`, `webp`, `gif`, `bmp`, `heic/heif` (Apple Photos), `tif/tiff`, and `avif`.
 
@@ -109,12 +101,9 @@ Shopping list output supports:
 - GIF 1: recipe split-view walkthrough
 - GIF 2: shopping list generation from canvas
 - GIF 3: URL transcription into template
-- Sample vault + sample canvas files
 
 Reference pack:
 - `docs/demos/README.md`
-- `samples/README.md`
-- `samples/sample-weekly-meal-plan.canvas`
 
 ## Compatibility
 

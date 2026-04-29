@@ -41,6 +41,40 @@ test("loadSettings seeds fresh installs with default excluded pantry ingredients
   );
 });
 
+test("saveSettings strips legacy mode flags from persisted settings", async () => {
+  const plugin = new PluginClass();
+  let saved = null;
+
+  plugin.settings = {
+    workflowPreset: "balanced",
+    featureBasicEnabled: true,
+    featureMealPrepEnabled: true,
+    settingsSectionState: {
+      workflowModeCollapsed: true,
+      firstTimeSetupCollapsed: false,
+    },
+    ingredientLineTemplate: "{{Amount}} {{Unit}} {{Ingredient}}",
+    measurementPreset: "vault_standard",
+    measurementPreference: "weight",
+    cupMl: 250,
+    tbspMl: 15,
+    tspMl: 5,
+    cupShorthand: "cup",
+    tbspShorthand: "tbsp",
+    tspShorthand: "tsp",
+  };
+  plugin.saveData = async (value) => {
+    saved = JSON.parse(JSON.stringify(value));
+  };
+
+  await plugin.saveSettings();
+
+  assert.equal("workflowPreset" in saved, false);
+  assert.equal("featureBasicEnabled" in saved, false);
+  assert.equal("featureMealPrepEnabled" in saved, false);
+  assert.equal("workflowModeCollapsed" in saved.settingsSectionState, false);
+});
+
 test("createWeeklyMealPrepCanvas copies the plugin canvas template into the target folder", async () => {
   const plugin = new PluginClass();
   const createdFiles = [];
