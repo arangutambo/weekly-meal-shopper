@@ -101,24 +101,6 @@ Supported image inbox formats for folder transcription include `jpg/jpeg`, `png`
 - Subheading sync works across matching `####` sections between ingredients and directions.
 - Ingredient highlighting can bold ingredients mentioned in the active step and visually sync matching ingredient groups.
 
-### Recipe View Demos
-
-Animated walkthrough of the split-pane recipe view using `Rainbow Plant Life Scrambled Tofu` from the vault:
-
-![Recipe view walkthrough](docs/gifs/recipe-view.gif)
-
-Ingredient highlighting follows the active step so the left pane stays in sync with what you are cooking:
-
-![Ingredient highlighting walkthrough](docs/gifs/ingredient-highlighting.gif)
-
-Cross ingredients off as you cook without losing your place in the directions pane:
-
-![Ingredient cross-off walkthrough](docs/gifs/ingredient-cross-off.gif)
-
-Grouped recipes can stay aligned across matching `####` subheadings, shown here with the Breakfast Burrito section-sync demo note:
-
-![Subheading sync walkthrough](docs/gifs/subheading-sync.gif)
-
 ## Shopping Lists + Meal Prep
 
 - Weekly shopping lists are generated from recipe cards on your active or configured meal-plan canvas.
@@ -126,9 +108,3 @@ Grouped recipes can stay aligned across matching `####` subheadings, shown here 
 - Excluded ingredients and ingredient overrides can change what appears on the final shopping list.
 - Frozen portions can be projected, inspected, and applied back to recipes through the meal-prep commands.
 - Optional shopping-list annotations can show category reasons and one-click override links.
-
-### Canvas Workflow Demo
-
-This example shows a recipe card being organized on the weekly canvas and then the linked note metadata view using the `Breakfast Burrito Section Sync Demo` vault example:
-
-![Canvas to metadata walkthrough](docs/gifs/canvas-to-metadata.gif)
