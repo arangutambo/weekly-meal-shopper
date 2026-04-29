@@ -1,19 +1,74 @@
 .weekly-meal-shopper-list-section {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  padding: 12px;
   margin-top: 14px;
+}
+
+.weekly-meal-shopper-settings-title {
+  font-size: 2.05em;
+  line-height: 1.15;
+  margin-bottom: 18px;
 }
 
 .weekly-meal-shopper-foldable-toggle {
   width: 100%;
   text-align: left;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  color: inherit;
+}
+
+.weekly-meal-shopper-foldable-toggle:hover,
+.weekly-meal-shopper-foldable-toggle:focus-visible {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.weekly-meal-shopper-heading {
+  cursor: pointer;
+  margin-bottom: 18px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.weekly-meal-shopper-heading.is-collapsed {
+  margin-bottom: 0;
+}
+
+.weekly-meal-shopper-heading-title-row {
+  display: flex;
+  align-items: center;
+}
+
+.weekly-meal-shopper-heading-title {
   font-weight: 600;
-  margin-bottom: 8px;
+}
+
+.weekly-meal-shopper-heading-description {
+  margin-top: 4px;
+  color: var(--text-muted);
+  line-height: var(--line-height-tight);
+}
+
+.weekly-meal-shopper-collapse-indicator {
+  color: var(--text-faint);
+  display: inline-block;
+  margin-right: 8px;
+  position: relative;
+  top: -1px;
+  font-size: 10px;
+  transform: rotate(90deg);
+  transition: transform 140ms ease;
+}
+
+.weekly-meal-shopper-heading.is-collapsed .weekly-meal-shopper-collapse-indicator {
+  transform: rotate(0deg);
 }
 
 .weekly-meal-shopper-foldable-body {
-  margin-top: 6px;
+  padding-left: 24px;
+  padding-bottom: 16px;
 }
 
 .weekly-meal-shopper-section-search {
@@ -61,8 +116,44 @@
   padding: 6px 8px;
 }
 
+.weekly-meal-shopper-entry-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .weekly-meal-shopper-entry-text {
   overflow-wrap: anywhere;
+}
+
+.weekly-meal-shopper-entry-row-draggable {
+  cursor: grab;
+}
+
+.weekly-meal-shopper-entry-row-draggable:active {
+  cursor: grabbing;
+}
+
+.weekly-meal-shopper-drag-handle {
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: -1px;
+  user-select: none;
+  flex: 0 0 auto;
+}
+
+.weekly-meal-shopper-entry-row.is-dragging {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.weekly-meal-shopper-entry-row.is-drop-target {
+  border-color: var(--interactive-accent);
+  background: var(--background-secondary);
+  box-shadow: 0 0 0 1px var(--background-modifier-border-focus);
 }
 
 .weekly-meal-shopper-remove-btn {
@@ -71,6 +162,10 @@
 
 .weekly-meal-shopper-empty {
   color: var(--text-muted);
+}
+
+.weekly-meal-shopper-reorder-help {
+  margin-bottom: 8px;
 }
 
 .weekly-meal-shopper-category-checkboxes {
@@ -87,12 +182,18 @@
   font-size: var(--font-ui-small);
 }
 
-.weekly-meal-shopper-template-editor {
-  width: 100%;
-  min-height: 60vh;
-  resize: vertical;
-  font-family: var(--font-monospace);
-  line-height: 1.45;
+.weekly-meal-shopper-inline-reveal {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  background: var(--background-secondary);
+}
+
+.weekly-meal-shopper-inline-reveal-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
 }
 
 .weekly-meal-shopper-recipe-view {

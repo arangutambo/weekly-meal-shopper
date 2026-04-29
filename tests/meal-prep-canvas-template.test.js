@@ -18,6 +18,29 @@ test("buildMealPrepCanvasFilename uses ISO week and ISO year placeholders", () =
   assert.equal(fileName, "⛑️ Weekly Meal Plan Week 45 2026.canvas");
 });
 
+test("loadSettings preserves an existing date-based canvas name template during updates", async () => {
+  const plugin = new PluginClass();
+  plugin.loadData = async () => ({
+    mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan {{date}}.canvas",
+  });
+
+  await plugin.loadSettings();
+
+  assert.equal(plugin.settings.mealPrepCanvasNameTemplate, "⛑️ Weekly Meal Plan {{date}}.canvas");
+});
+
+test("loadSettings seeds fresh installs with default excluded pantry ingredients", async () => {
+  const plugin = new PluginClass();
+  plugin.loadData = async () => ({});
+
+  await plugin.loadSettings();
+
+  assert.deepEqual(
+    Array.from(plugin.settings.excludedIngredientsExact || []),
+    ["black pepper", "salt", "water"]
+  );
+});
+
 test("createWeeklyMealPrepCanvas copies the plugin canvas template into the target folder", async () => {
   const plugin = new PluginClass();
   const createdFiles = [];
@@ -27,6 +50,7 @@ test("createWeeklyMealPrepCanvas copies the plugin canvas template into the targ
   plugin.settings = {
     mealPrepCanvasFolder: "Utility",
     mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas",
+    mealPrepCanvasTemplateVaultPath: "Templates/Weekly Meal Shopper/Meal Prep Canvas Template.canvas",
   };
   plugin.ensureFolderPathExists = async () => {};
   plugin.saveSettings = async () => {};
@@ -41,7 +65,7 @@ test("createWeeklyMealPrepCanvas copies the plugin canvas template into the targ
       },
       adapter: {
         exists: async (filePath) =>
-          filePath === ".obsidian/plugins/weekly-meal-shopper/templates/meal-prep-canvas-template.canvas",
+          filePath === "Templates/Weekly Meal Shopper/Meal Prep Canvas Template.canvas",
         read: async () => templateContent,
       },
     },

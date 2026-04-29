@@ -34,7 +34,11 @@ const DEFAULT_SETTINGS = {
   transcriptionMetricOutput: true,
   useStoredTranscriptionApiKey: false,
   parsedIngredientsField: "IngredientsParsed",
-  excludedIngredientsExact: [],
+  excludedIngredientsExact: [
+    "black pepper",
+    "salt",
+    "water",
+  ],
   ingredientOverrides: [],
   transcriptionImageFolder: "Utility/Recipe Image Inbox",
   deleteTranscribedImages: true,
@@ -47,10 +51,7 @@ const DEFAULT_SETTINGS = {
   settingsImportExportPath: ".obsidian/plugins/weekly-meal-shopper/settings-export.json",
   settingsSectionState: {
     workflowModeCollapsed: false,
-    howItWorksCollapsed: false,
     firstTimeSetupCollapsed: false,
-    recipeTemplateStorageCollapsed: false,
-    mealPrepCanvasTemplateStorageCollapsed: false,
     mealPrepSetupCollapsed: false,
     recipeSetupCollapsed: false,
     ingredientFormatCollapsed: false,
@@ -59,7 +60,6 @@ const DEFAULT_SETTINGS = {
     shoppingCategoriesCollapsed: false,
     excludeIngredientsCollapsed: false,
     ingredientOverridesCollapsed: false,
-    categoryLibraryCollapsed: false,
   },
 };
 
@@ -1330,6 +1330,17 @@ function getSelectableIngredientCategories(config) {
   return categories.filter(Boolean);
 }
 
+function moveArrayItem(values, fromIndex, toIndex) {
+  const items = Array.isArray(values) ? [...values] : [];
+  if (fromIndex < 0 || fromIndex >= items.length) return items;
+  if (toIndex < 0) toIndex = 0;
+  if (toIndex > items.length) toIndex = items.length;
+  const [moved] = items.splice(fromIndex, 1);
+  const boundedIndex = Math.max(0, Math.min(toIndex, items.length));
+  items.splice(boundedIndex, 0, moved);
+  return items;
+}
+
 const OUTPUT_UNIT_MAP = {
   g: { base: "g", factor: 1 },
   kg: { base: "g", factor: 1 / 1000 },
@@ -2073,7 +2084,7 @@ class TextEntryModal extends Modal {
   }
 }
 
-class PluginTemplateEditorModal extends Modal {
+class TemplateSetupModal extends Modal {
   constructor(app, options) {
     super(app);
     this.options = options || {};
@@ -2082,7 +2093,7 @@ class PluginTemplateEditorModal extends Modal {
 
   onOpen() {
     const { contentEl, titleEl } = this;
-    titleEl.setText(this.options.title || "Edit plugin template");
+    titleEl.setText(this.options.title || "First-Time Setup");
     contentEl.empty();
 
     if (this.options.description) {
@@ -2092,53 +2103,77 @@ class PluginTemplateEditorModal extends Modal {
       });
     }
 
-    const textarea = contentEl.createEl("textarea", {
-      cls: "weekly-meal-shopper-template-editor",
-    });
-    textarea.value = String(this.options.initialValue || "");
+    const canvasLabel = contentEl.createEl("label", { text: "Canvas template location" });
+    canvasLabel.style.display = "block";
+    canvasLabel.style.marginBottom = "6px";
+
+    const canvasInput = contentEl.createEl("input", { type: "text" });
+    canvasInput.value = String(this.options.canvasPath || "");
+    canvasInput.placeholder = DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath;
+    canvasInput.style.width = "100%";
+    canvasInput.style.marginBottom = "12px";
+
+    const recipeLabel = contentEl.createEl("label", { text: "Recipe template location" });
+    recipeLabel.style.display = "block";
+    recipeLabel.style.marginBottom = "6px";
+
+    const recipeInput = contentEl.createEl("input", { type: "text" });
+    recipeInput.value = String(this.options.recipePath || "");
+    recipeInput.placeholder = DEFAULT_SETTINGS.recipeTemplateVaultPath;
+    recipeInput.style.width = "100%";
+    recipeInput.style.marginBottom = "12px";
 
     const buttons = contentEl.createDiv();
     buttons.style.display = "flex";
     buttons.style.justifyContent = "flex-end";
     buttons.style.gap = "8px";
-    buttons.style.marginTop = "12px";
 
     const cancelBtn = buttons.createEl("button", { text: "Cancel" });
-    const saveBtn = buttons.createEl("button", { text: this.options.submitText || "Save" });
-    saveBtn.addClass("mod-cta");
+    const okBtn = buttons.createEl("button", { text: this.options.submitText || "Save + Populate" });
+    okBtn.addClass("mod-cta");
 
-    const submit = async () => {
-      try {
-        await this.options.onSubmit?.(String(textarea.value || ""));
-        this.submitted = true;
-        this.close();
-      } catch (error) {
-        new Notice(`Save failed: ${error?.message || String(error)}`);
-      }
+    const submit = () => {
+      const canvasPath = String(canvasInput.value || "").trim() || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath;
+      const recipePath = String(recipeInput.value || "").trim() || DEFAULT_SETTINGS.recipeTemplateVaultPath;
+      this.submitted = true;
+      this.options.onSubmit?.({ canvasPath, recipePath });
+      this.close();
     };
 
-    cancelBtn.addEventListener("click", () => {
+    const cancel = () => {
       this.submitted = true;
       this.options.onCancel?.();
       this.close();
-    });
-    saveBtn.addEventListener("click", () => {
-      submit();
-    });
-    textarea.addEventListener("keydown", (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+    };
+
+    const handleKeydown = (event, nextInput = null) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
+        submit();
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (nextInput) {
+          nextInput.focus();
+          nextInput.select();
+          return;
+        }
         submit();
       } else if (event.key === "Escape") {
         event.preventDefault();
-        this.submitted = true;
-        this.options.onCancel?.();
-        this.close();
+        cancel();
       }
-    });
+    };
+
+    cancelBtn.addEventListener("click", cancel);
+    okBtn.addEventListener("click", submit);
+    canvasInput.addEventListener("keydown", (event) => handleKeydown(event, recipeInput));
+    recipeInput.addEventListener("keydown", (event) => handleKeydown(event));
 
     window.setTimeout(() => {
-      textarea.focus();
+      canvasInput.focus();
+      canvasInput.select();
     }, 0);
   }
 
@@ -2344,9 +2379,6 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.excludedIngredientsExact = normalizeExactExclusionList(this.settings.excludedIngredientsExact);
     this.settings.ingredientOverrides = normalizeExactExclusionList(this.settings.ingredientOverrides);
     this.settings.mealPrepCanvasFolder = String(this.settings.mealPrepCanvasFolder || "Utility").trim() || "Utility";
-    if (String(this.settings.mealPrepCanvasNameTemplate || "").trim() === "⛑️ Weekly Meal Plan {{date}}.canvas") {
-      this.settings.mealPrepCanvasNameTemplate = DEFAULT_SETTINGS.mealPrepCanvasNameTemplate;
-    }
     this.settings.mealPrepCanvasNameTemplate = String(
       this.settings.mealPrepCanvasNameTemplate || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate
     ).trim() || DEFAULT_SETTINGS.mealPrepCanvasNameTemplate;
@@ -2390,10 +2422,7 @@ class WeeklyMealShopperPlugin extends Plugin {
       : {};
     this.settings.settingsSectionState = {
       workflowModeCollapsed: !!sectionState.workflowModeCollapsed,
-      howItWorksCollapsed: !!sectionState.howItWorksCollapsed,
       firstTimeSetupCollapsed: !!sectionState.firstTimeSetupCollapsed,
-      recipeTemplateStorageCollapsed: !!sectionState.recipeTemplateStorageCollapsed,
-      mealPrepCanvasTemplateStorageCollapsed: !!sectionState.mealPrepCanvasTemplateStorageCollapsed,
       mealPrepSetupCollapsed: !!sectionState.mealPrepSetupCollapsed,
       recipeSetupCollapsed: !!sectionState.recipeSetupCollapsed,
       ingredientFormatCollapsed: !!sectionState.ingredientFormatCollapsed,
@@ -2402,7 +2431,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       shoppingCategoriesCollapsed: !!sectionState.shoppingCategoriesCollapsed,
       excludeIngredientsCollapsed: !!sectionState.excludeIngredientsCollapsed,
       ingredientOverridesCollapsed: !!sectionState.ingredientOverridesCollapsed,
-      categoryLibraryCollapsed: !!sectionState.categoryLibraryCollapsed,
     };
     this.settings.transcriptionApiKey = String(this.settings.transcriptionApiKey || "").trim();
     if (typeof this.settings.useStoredTranscriptionApiKey !== "boolean") {
@@ -2526,7 +2554,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     try {
       templateContent = await this.readEditableVaultTemplate(
         this.getEditableMealPrepCanvasTemplatePath(),
-        "Editable meal-prep canvas template not found. Run the populate template action in First-time setup first."
+        "Editable meal-prep canvas template not found. Run template setup in First-Time Setup first."
       );
     } catch (error) {
       new Notice(error?.message || String(error));
@@ -2647,6 +2675,17 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
   }
 
+  async promptTemplateSetup(options = {}) {
+    return await new Promise((resolve) => {
+      const modal = new TemplateSetupModal(this.app, {
+        ...options,
+        onSubmit: (value) => resolve(value),
+        onCancel: () => resolve({ cancelled: true }),
+      });
+      modal.open();
+    });
+  }
+
   formatLocalIsoDate(inputDate = new Date()) {
     const date = new Date(inputDate);
     const year = date.getFullYear();
@@ -2705,6 +2744,8 @@ class WeeklyMealShopperPlugin extends Plugin {
     bundledTemplatePath,
     targetPath,
     label,
+    openTargetFile = true,
+    showNotice = true,
   }) {
     const normalizedTarget = normalizePath(String(targetPath || "").trim());
     if (!normalizedTarget) {
@@ -2714,8 +2755,8 @@ class WeeklyMealShopperPlugin extends Plugin {
     await this.ensureParentFolderForFilePath(normalizedTarget);
     const existing = this.app.vault.getAbstractFileByPath(normalizedTarget);
     if (existing instanceof TFile) {
-      await this.app.workspace.getLeaf(true).openFile(existing);
-      new Notice(`${label} already exists: ${existing.path}`);
+      if (openTargetFile) await this.app.workspace.getLeaf(true).openFile(existing);
+      if (showNotice) new Notice(`${label} already exists: ${existing.path}`);
       return existing;
     }
     if (existing) {
@@ -2727,70 +2768,60 @@ class WeeklyMealShopperPlugin extends Plugin {
       normalizedTarget,
       templateContent.endsWith("\n") ? templateContent : `${templateContent}\n`
     );
-    await this.app.workspace.getLeaf(true).openFile(created);
-    new Notice(`${label} created: ${created.path}`);
+    if (openTargetFile) await this.app.workspace.getLeaf(true).openFile(created);
+    if (showNotice) new Notice(`${label} created: ${created.path}`);
     return created;
   }
 
-  async populateEditableRecipeTemplateInVault() {
+  async populateEditableRecipeTemplateInVault({ openFile = true, showNotice = true } = {}) {
     return await this.populateVaultTemplateFromBundledBase({
       bundledTemplatePath: RECIPE_TEMPLATE_PATH,
       targetPath: this.getEditableRecipeTemplatePath(),
       label: "Editable recipe template",
+      openTargetFile: openFile,
+      showNotice,
     });
   }
 
-  async populateEditableMealPrepCanvasTemplateInVault() {
+  async populateEditableMealPrepCanvasTemplateInVault({ openFile = true, showNotice = true } = {}) {
     return await this.populateVaultTemplateFromBundledBase({
       bundledTemplatePath: MEAL_PREP_CANVAS_TEMPLATE_PATH,
       targetPath: this.getEditableMealPrepCanvasTemplatePath(),
       label: "Editable meal-prep canvas template",
+      openTargetFile: openFile,
+      showNotice,
     });
   }
 
-  async openPluginTemplateFile(templatePath, missingMessage = "Plugin template file not found.") {
-    const path = normalizePath(templatePath);
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) {
-      new Notice(missingMessage);
-      return null;
-    }
-    await this.app.workspace.getLeaf(true).openFile(file);
-    return file;
-  }
-
-  async editPluginTemplateFile(
-    templatePath,
-    {
-      title = "Edit plugin template",
-      successMessage = "Plugin template saved.",
-      missingMessage = "Plugin template file not found.",
-    } = {}
-  ) {
-    const path = normalizePath(templatePath);
-    const exists = await this.app.vault.adapter.exists(path);
-    if (!exists) {
-      new Notice(missingMessage);
-      return null;
-    }
-
-    const initialValue = await this.app.vault.adapter.read(path);
-    return await new Promise((resolve) => {
-      const modal = new PluginTemplateEditorModal(this.app, {
-        title,
-        description: `Plugin template path: ${path}`,
-        initialValue,
-        submitText: "Save",
-        onSubmit: async (value) => {
-          const next = value.endsWith("\n") ? value : `${value}\n`;
-          await this.app.vault.adapter.write(path, next);
-          new Notice(successMessage);
-          resolve({ path, content: next });
-        },
-        onCancel: () => resolve(null),
-      });
-      modal.open();
+  async runFirstTimeTemplateSetup() {
+    const result = await this.promptTemplateSetup({
+      title: "First-Time Setup",
+      description: "Choose where the editable canvas and recipe templates should live in your vault. The plugin will create both files from its bundled base templates.",
+      canvasPath: this.getEditableMealPrepCanvasTemplatePath(),
+      recipePath: this.getEditableRecipeTemplatePath(),
+      submitText: "Save + Populate",
     });
+    if (result?.cancelled) return null;
+
+    this.settings.mealPrepCanvasTemplateVaultPath = normalizePath(
+      String(result.canvasPath || "").trim() || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath
+    );
+    this.settings.recipeTemplateVaultPath = normalizePath(
+      String(result.recipePath || "").trim() || DEFAULT_SETTINGS.recipeTemplateVaultPath
+    );
+    await this.saveSettings();
+
+    const canvasFile = await this.populateEditableMealPrepCanvasTemplateInVault({
+      openFile: false,
+      showNotice: false,
+    });
+    const recipeFile = await this.populateEditableRecipeTemplateInVault({
+      openFile: false,
+      showNotice: false,
+    });
+
+    new Notice("First-Time Setup complete. Your editable canvas and recipe templates are ready.");
+    return { canvasFile, recipeFile };
   }
 
   getRecipeTemplateFolder() {
@@ -2828,7 +2859,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     try {
       templateContent = await this.readEditableVaultTemplate(
         this.getEditableRecipeTemplatePath(),
-        "Editable recipe template not found. Run the populate template action in First-time setup first."
+        "Editable recipe template not found. Run template setup in First-Time Setup first."
       );
     } catch (error) {
       new Notice(error?.message || String(error));
@@ -4584,31 +4615,24 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
-  getSectionState(key) {
-    const state = this.plugin.settings.settingsSectionState || {};
-    return !!state[key];
-  }
-
-  async setSectionState(key, value) {
-    const state = this.plugin.settings.settingsSectionState || {};
-    this.plugin.settings.settingsSectionState = { ...state, [key]: !!value };
-    await this.plugin.saveSettings();
-  }
-
-  buildFoldableSection(containerEl, { stateKey, title, description, searchPlaceholder }) {
-    const section = containerEl.createDiv({ cls: "weekly-meal-shopper-list-section weekly-meal-shopper-foldable" });
+  buildFoldableSection(containerEl, { title, description, searchPlaceholder }) {
+    const section = containerEl.createDiv({ cls: "weekly-meal-shopper-list-section weekly-meal-shopper-foldable is-collapsed" });
     const header = section.createEl("button", {
-      text: title,
-      cls: "weekly-meal-shopper-foldable-toggle",
+      cls: "weekly-meal-shopper-foldable-toggle weekly-meal-shopper-heading is-collapsed",
     });
-    const body = section.createDiv({ cls: "weekly-meal-shopper-foldable-body" });
-    const collapsed = this.getSectionState(stateKey);
-    body.style.display = collapsed ? "none" : "";
-    header.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    header.type = "button";
+    header.setAttribute("aria-expanded", "false");
+
+    const titleRow = header.createDiv({ cls: "weekly-meal-shopper-heading-title-row" });
+    titleRow.createSpan({ cls: "weekly-meal-shopper-collapse-indicator", text: "▶" });
+    titleRow.createSpan({ cls: "weekly-meal-shopper-heading-title", text: title });
 
     if (description) {
-      body.createEl("p", { text: description, cls: "weekly-meal-shopper-help" });
+      header.createDiv({ cls: "weekly-meal-shopper-heading-description", text: description });
     }
+
+    const body = section.createDiv({ cls: "weekly-meal-shopper-foldable-body" });
+    body.style.display = "none";
 
     let searchWrap = null;
     let searchInput = null;
@@ -4619,15 +4643,25 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
         placeholder: searchPlaceholder || "Search",
       });
       searchInput.addClass("weekly-meal-shopper-search-input");
-      searchWrap.style.display = collapsed ? "none" : "";
+      searchWrap.style.display = "none";
     }
 
-    header.addEventListener("click", async () => {
-      const nextCollapsed = body.style.display !== "none";
-      body.style.display = nextCollapsed ? "none" : "";
-      if (searchWrap) searchWrap.style.display = nextCollapsed ? "none" : "";
-      header.setAttribute("aria-expanded", nextCollapsed ? "false" : "true");
-      await this.setSectionState(stateKey, nextCollapsed);
+    const setCollapsed = (collapsed) => {
+      section.classList.toggle("is-collapsed", collapsed);
+      header.classList.toggle("is-collapsed", collapsed);
+      body.style.display = collapsed ? "none" : "";
+      if (searchWrap) searchWrap.style.display = collapsed ? "none" : "";
+      header.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    };
+
+    header.addEventListener("click", () => {
+      setCollapsed(body.style.display !== "none");
+    });
+    header.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        setCollapsed(body.style.display !== "none");
+      }
     });
 
     return { section, body, searchInput };
@@ -4640,203 +4674,20 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     }
   }
 
-  renderTemplateStorageSection(containerEl, {
-    stateKey,
-    title,
-    description,
-    pathLabel,
-    pathDescription,
-    pathPlaceholder,
-    pathValue,
-    onPathChange,
-    onPopulate,
-    onOpen,
-    populateText,
-    openText,
-  }) {
-    const { body } = this.buildFoldableSection(containerEl, {
-      stateKey,
-      title,
-      description,
-    });
-
-    new Setting(body)
-      .setName(pathLabel)
-      .setDesc(pathDescription)
-      .addText((text) =>
-        text
-          .setPlaceholder(pathPlaceholder)
-          .setValue(pathValue)
-          .onChange(async (value) => {
-            await onPathChange(value);
-          })
-      );
-
-    new Setting(body)
-      .setName("Template actions")
-      .setDesc("Create the editable vault copy from the bundled plugin base, then open that vault file for normal editing.")
-      .addButton((btn) =>
-        btn.setButtonText(populateText).onClick(async () => {
-          try {
-            await onPopulate();
-          } catch (error) {
-            new Notice(error?.message || String(error));
-          }
-        })
-      )
-      .addButton((btn) =>
-        btn.setButtonText(openText).onClick(async () => {
-          try {
-            await onOpen();
-          } catch (error) {
-            new Notice(error?.message || String(error));
-          }
-        })
-      );
-  }
-
   async display() {
     const { containerEl } = this;
     containerEl.empty();
     const categoryConfig = await this.plugin.loadIngredientCategoryConfig();
     const categories = getSelectableIngredientCategories(categoryConfig);
 
-    containerEl.createEl("h2", { text: "Weekly Meal Shopper" });
-    containerEl.createEl("p", {
-      text: "Modes let you publish the plugin with a simpler surface area while keeping advanced workflows available.",
-      cls: "weekly-meal-shopper-help",
-    });
-
-    this.renderCategoryHeading(containerEl, {
-      title: "Getting Started",
-      description: "Start here to choose the workflow shape for the plugin and understand how the main commands fit together.",
-    });
-
-    const { body: workflowBody } = this.buildFoldableSection(containerEl, {
-      stateKey: "workflowModeCollapsed",
-      title: "Workflow + modes",
-      description: "Core feature toggles and preset profiles for the plugin surface area.",
-    });
-
-    new Setting(workflowBody)
-      .setName("Basic mode features")
-      .setDesc("Recipe view, parse ingredients, and URL/image transcription commands.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.featureBasicEnabled !== false)
-          .onChange(async (value) => {
-            this.plugin.settings.featureBasicEnabled = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(workflowBody)
-      .setName("Meal Prep mode features")
-      .setDesc("Canvas-driven shopping list, frozen portions, and meal-prep canvas commands.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.featureMealPrepEnabled !== false)
-          .onChange(async (value) => {
-            this.plugin.settings.featureMealPrepEnabled = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    let selectedPreset = this.plugin.settings.workflowPreset || "balanced";
-    new Setting(workflowBody)
-      .setName("Workflow preset")
-      .setDesc("Apply a pre-configured mode profile for common publishing scenarios.")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("balanced", "Balanced (recommended)")
-          .addOption("basic_only", "Basic only")
-          .addOption("meal_prep", "Meal Prep")
-          .setValue(selectedPreset)
-          .onChange((value) => {
-            selectedPreset = value;
-          })
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Apply preset").onClick(async () => {
-          await this.plugin.applyWorkflowPreset(selectedPreset);
-          new Notice(`Applied workflow preset: ${selectedPreset}.`);
-          await this.display();
-        })
-      );
-
-    const { body: howItWorksBody } = this.buildFoldableSection(containerEl, {
-      stateKey: "howItWorksCollapsed",
-      title: "How It Works",
-    });
-
-    howItWorksBody.createEl("p", {
-      text: "Basic mode standardizes recipes, parses ingredients, and supports recipe transcription from URL/image sources.",
-      cls: "weekly-meal-shopper-help",
-    });
-    howItWorksBody.createEl("p", {
-      text: "Meal Prep mode reads recipe cards from your weekly canvas, scales ingredient totals, and outputs a categorized shopping checklist.",
-      cls: "weekly-meal-shopper-help",
-    });
-
-    const { body: firstTimeSetupBody } = this.buildFoldableSection(containerEl, {
-      stateKey: "firstTimeSetupCollapsed",
-      title: "First-time setup",
-      description: "Choose where the editable template copies live in your vault. The bundled plugin templates stay inside the plugin and are only used to initialize these editable vault files.",
-    });
-
-    this.renderTemplateStorageSection(firstTimeSetupBody, {
-      stateKey: "recipeTemplateStorageCollapsed",
-      title: "Editable recipe template",
-      description: "This is the vault file the recipe creation command will read from after setup.",
-      pathLabel: "Vault path",
-      pathDescription: "Where the editable recipe template copy should live in your vault.",
-      pathPlaceholder: DEFAULT_SETTINGS.recipeTemplateVaultPath,
-      pathValue: this.plugin.settings.recipeTemplateVaultPath || DEFAULT_SETTINGS.recipeTemplateVaultPath,
-      onPathChange: async (value) => {
-        this.plugin.settings.recipeTemplateVaultPath = value.trim() || DEFAULT_SETTINGS.recipeTemplateVaultPath;
-        await this.plugin.saveSettings();
-      },
-      onPopulate: async () => {
-        await this.plugin.populateEditableRecipeTemplateInVault();
-      },
-      onOpen: async () => {
-        await this.plugin.openVaultFileByPath(
-          this.plugin.getEditableRecipeTemplatePath(),
-          "Editable recipe template not found. Populate it in First-time setup first."
-        );
-      },
-      populateText: "Populate Recipe Template",
-      openText: "Open Recipe Template",
-    });
-
-    this.renderTemplateStorageSection(firstTimeSetupBody, {
-      stateKey: "mealPrepCanvasTemplateStorageCollapsed",
-      title: "Editable meal-prep canvas template",
-      description: "This is the vault file the weekly canvas creation command will read from after setup.",
-      pathLabel: "Vault path",
-      pathDescription: "Where the editable meal-prep canvas template copy should live in your vault.",
-      pathPlaceholder: DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath,
-      pathValue: this.plugin.settings.mealPrepCanvasTemplateVaultPath || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath,
-      onPathChange: async (value) => {
-        this.plugin.settings.mealPrepCanvasTemplateVaultPath = value.trim() || DEFAULT_SETTINGS.mealPrepCanvasTemplateVaultPath;
-        await this.plugin.saveSettings();
-      },
-      onPopulate: async () => {
-        await this.plugin.populateEditableMealPrepCanvasTemplateInVault();
-      },
-      onOpen: async () => {
-        await this.plugin.openVaultFileByPath(
-          this.plugin.getEditableMealPrepCanvasTemplatePath(),
-          "Editable meal-prep canvas template not found. Populate it in First-time setup first."
-        );
-      },
-      populateText: "Populate Canvas Template",
-      openText: "Open Canvas Template",
+    containerEl.createEl("h2", {
+      text: "Weekly Meal Shopper",
+      cls: "weekly-meal-shopper-settings-title",
     });
 
     this.renderCategoryHeading(containerEl, {
       title: "Meal Prep",
-      description: "Weekly canvas creation, naming, template access, and shopping-list output live here.",
+      description: "Weekly canvas creation, naming, and shopping-list output live here.",
     });
 
     const { body: mealPrepBody } = this.buildFoldableSection(containerEl, {
@@ -5165,9 +5016,26 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(transcriptionBody)
-      .setName("OpenAI API key (transcription)")
-      .setDesc("Used for image and URL recipe transcription. Leave blank to use OPENAI_API_KEY env var.")
+    const storedApiKeyWrap = transcriptionBody.createDiv({ cls: "weekly-meal-shopper-inline-reveal" });
+    new Setting(storedApiKeyWrap)
+      .setName("Use stored API key")
+      .setDesc("Toggle this on if you want transcription to use an API key saved in plugin settings instead of relying only on OPENAI_API_KEY.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.useStoredTranscriptionApiKey === true)
+          .onChange(async (value) => {
+            this.plugin.settings.useStoredTranscriptionApiKey = value;
+            apiKeyBody.style.display = value ? "" : "none";
+            await this.plugin.saveSettings();
+          })
+      );
+
+    const apiKeyBody = storedApiKeyWrap.createDiv({ cls: "weekly-meal-shopper-inline-reveal-body" });
+    apiKeyBody.style.display = this.plugin.settings.useStoredTranscriptionApiKey === true ? "" : "none";
+
+    new Setting(apiKeyBody)
+      .setName("Stored OpenAI API key")
+      .setDesc("Used for image and URL recipe transcription when the toggle above is on.")
       .addText((text) => {
         text
           .setPlaceholder("sk-...")
@@ -5249,13 +5117,109 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
     this.renderCategoryHeading(containerEl, {
       title: "Ingredient Rules",
-      description: "Classification categories, exclusions, overrides, and editable rule libraries are grouped here.",
+      description: "Classification categories, exclusions, and overrides are grouped here.",
     });
 
     this.renderShoppingCategoriesSection(containerEl, categoryConfig);
     this.renderExcludedIngredientsSection(containerEl, categories);
     this.renderIngredientOverridesSection(containerEl, categories);
-    this.renderCategoryLibrarySection(containerEl);
+
+    const { body: workflowBody } = this.buildFoldableSection(containerEl, {
+      stateKey: "workflowModeCollapsed",
+      title: "Workflow + modes",
+      description: "Core feature toggles and preset profiles for the plugin surface area.",
+    });
+
+    new Setting(workflowBody)
+      .setName("Basic mode features")
+      .setDesc("Recipe view, parse ingredients, and URL/image transcription commands.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.featureBasicEnabled !== false)
+          .onChange(async (value) => {
+            this.plugin.settings.featureBasicEnabled = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(workflowBody)
+      .setName("Meal Prep mode features")
+      .setDesc("Canvas-driven shopping list, frozen portions, and meal-prep canvas commands.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.featureMealPrepEnabled !== false)
+          .onChange(async (value) => {
+            this.plugin.settings.featureMealPrepEnabled = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    let selectedPreset = this.plugin.settings.workflowPreset || "balanced";
+    new Setting(workflowBody)
+      .setName("Workflow preset")
+      .setDesc("Apply a pre-configured mode profile for common publishing scenarios.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("balanced", "Balanced (recommended)")
+          .addOption("basic_only", "Basic only")
+          .addOption("meal_prep", "Meal Prep")
+          .setValue(selectedPreset)
+          .onChange((value) => {
+            selectedPreset = value;
+          })
+      )
+      .addButton((btn) =>
+        btn.setButtonText("Apply preset").onClick(async () => {
+          await this.plugin.applyWorkflowPreset(selectedPreset);
+          new Notice(`Applied workflow preset: ${selectedPreset}.`);
+          await this.display();
+        })
+      );
+
+    this.renderCategoryHeading(containerEl, {
+      title: "First-Time Setup",
+      description: "Use this once to choose where the editable template copies should live in your vault, then open those files whenever you want to customize them.",
+    });
+
+    const { body: firstTimeSetupBody } = this.buildFoldableSection(containerEl, {
+      stateKey: "firstTimeSetupCollapsed",
+      title: "Template setup",
+      description: "The setup popup saves both vault locations and populates both editable templates from the bundled plugin base.",
+    });
+
+    new Setting(firstTimeSetupBody)
+      .setName("Run setup")
+      .setDesc("Choose the canvas and recipe template locations in one popup, then populate both files automatically.")
+      .addButton((btn) =>
+        btn.setButtonText("Run First-Time Setup").setCta().onClick(async () => {
+          try {
+            await this.plugin.runFirstTimeTemplateSetup();
+            await this.display();
+          } catch (error) {
+            new Notice(error?.message || String(error));
+          }
+        })
+      );
+
+    new Setting(firstTimeSetupBody)
+      .setName("Open editable templates")
+      .setDesc("After setup, open the editable vault copies to customize the canvas and recipe templates.")
+      .addButton((btn) =>
+        btn.setButtonText("Open Canvas Template").onClick(async () => {
+          await this.plugin.openVaultFileByPath(
+            this.plugin.getEditableMealPrepCanvasTemplatePath(),
+            "Editable meal-prep canvas template not found. Run First-Time Setup first."
+          );
+        })
+      )
+      .addButton((btn) =>
+        btn.setButtonText("Open Recipe Template").onClick(async () => {
+          await this.plugin.openVaultFileByPath(
+            this.plugin.getEditableRecipeTemplatePath(),
+            "Editable recipe template not found. Run First-Time Setup first."
+          );
+        })
+      );
   }
 
   renderShoppingCategoriesSection(containerEl, categoryConfig) {
@@ -5267,16 +5231,52 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     });
 
     let searchQuery = "";
+    let draggedCategory = "";
     const controls = body.createDiv({ cls: "weekly-meal-shopper-controls" });
     const addBtn = controls.createEl("button", { text: "+" });
     addBtn.addClass("mod-cta");
     addBtn.addClass("weekly-meal-shopper-plus-btn");
     addBtn.setAttribute("aria-label", "Add shopping category");
 
+    const reorderHelp = body.createEl("p", {
+      cls: "weekly-meal-shopper-help weekly-meal-shopper-reorder-help",
+    });
     const listEl = body.createDiv({ cls: "weekly-meal-shopper-entry-list" });
+
+    const clearDragState = () => {
+      listEl.querySelectorAll(".weekly-meal-shopper-entry-row").forEach((row) => {
+        row.removeClass("is-dragging");
+        row.removeClass("is-drop-target");
+      });
+    };
+
+    const reorderCategories = async (targetCategory, placeAfter) => {
+      if (!draggedCategory || draggedCategory === targetCategory) return;
+      const currentOrder = getSelectableIngredientCategories(categoryConfig);
+      const fromIndex = currentOrder.indexOf(draggedCategory);
+      const targetIndex = currentOrder.indexOf(targetCategory);
+      if (fromIndex === -1 || targetIndex === -1) return;
+
+      // When dragging downward, removing the source item shifts the later insertion index back by one.
+      let insertIndex = targetIndex + (placeAfter ? 1 : 0);
+      if (fromIndex < insertIndex) insertIndex -= 1;
+
+      const nextOrder = moveArrayItem(currentOrder, fromIndex, insertIndex);
+      if (nextOrder.join("\n") === currentOrder.join("\n")) return;
+
+      categoryConfig.categoryOrder = [...nextOrder];
+      await this.plugin.saveIngredientCategoryConfig(categoryConfig);
+      renderList();
+    };
 
     const renderList = () => {
       listEl.empty();
+      const canReorder = !searchQuery;
+      reorderHelp.setText(
+        canReorder
+          ? "Drag and hold a category row to rearrange the shopping-list order."
+          : "Clear the search to drag and rearrange categories."
+      );
       const categories = getSelectableIngredientCategories(categoryConfig)
         .filter((category) => normalizeSearchText(category).includes(searchQuery));
       if (categories.length === 0) {
@@ -5286,11 +5286,59 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
       for (const category of categories) {
         const row = listEl.createDiv({ cls: "weekly-meal-shopper-entry-row" });
+        const rowMain = row.createDiv({ cls: "weekly-meal-shopper-entry-main" });
         const isDefault = category === categoryConfig.defaultCategory;
-        row.createEl("span", {
+
+        if (canReorder) {
+          row.draggable = true;
+          row.addClass("weekly-meal-shopper-entry-row-draggable");
+          rowMain.createEl("span", {
+            text: "⋮⋮",
+            cls: "weekly-meal-shopper-drag-handle",
+          });
+
+          row.addEventListener("dragstart", (event) => {
+            draggedCategory = category;
+            row.addClass("is-dragging");
+            if (event.dataTransfer) {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", category);
+            }
+          });
+
+          row.addEventListener("dragover", (event) => {
+            if (!draggedCategory || draggedCategory === category) return;
+            event.preventDefault();
+            clearDragState();
+            row.addClass("is-drop-target");
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+          });
+
+          row.addEventListener("dragleave", () => {
+            row.removeClass("is-drop-target");
+          });
+
+          row.addEventListener("drop", async (event) => {
+            if (!draggedCategory || draggedCategory === category) return;
+            event.preventDefault();
+            const rect = row.getBoundingClientRect();
+            const placeAfter = event.clientY > rect.top + rect.height / 2;
+            clearDragState();
+            await reorderCategories(category, placeAfter);
+            draggedCategory = "";
+          });
+
+          row.addEventListener("dragend", () => {
+            draggedCategory = "";
+            clearDragState();
+          });
+        }
+
+        rowMain.createEl("span", {
           text: isDefault ? `${category} (default)` : category,
           cls: "weekly-meal-shopper-entry-text",
         });
+
         const removeBtn = row.createEl("button", { text: "Remove", cls: "weekly-meal-shopper-remove-btn" });
         removeBtn.addEventListener("click", async () => {
           const nextOrder = categoryConfig.categoryOrder.filter((v) => v !== category);
@@ -5483,61 +5531,6 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     renderList();
   }
 
-  renderCategoryLibrarySection(containerEl) {
-    const { body } = this.buildFoldableSection(containerEl, {
-      stateKey: "categoryLibraryCollapsed",
-      title: "Rule library files",
-      description: "Open the plugin's editable rule libraries for categories, density conversions, and unit aliases.",
-    });
-
-    new Setting(body)
-      .setName("Ingredient category base library")
-      .setDesc(`Rules file: ${INGREDIENT_CATEGORY_CONFIG_PATH}`)
-      .addButton((btn) =>
-        btn.setButtonText("Open Library File").onClick(async () => {
-          await this.plugin.ensureIngredientCategoryConfigFile();
-          const configPath = normalizePath(INGREDIENT_CATEGORY_CONFIG_PATH);
-          const file = this.app.vault.getAbstractFileByPath(configPath);
-          if (!(file instanceof TFile)) {
-            new Notice("Could not find ingredient category library file.");
-            return;
-          }
-          await this.app.workspace.getLeaf(true).openFile(file);
-        })
-      );
-
-    new Setting(body)
-      .setName("Unit-density rules library")
-      .setDesc(`Rules file: ${UNIT_DENSITY_CONFIG_PATH}`)
-      .addButton((btn) =>
-        btn.setButtonText("Open Density Rules").onClick(async () => {
-          await this.plugin.ensureUnitDensityConfigFile();
-          const configPath = normalizePath(UNIT_DENSITY_CONFIG_PATH);
-          const file = this.app.vault.getAbstractFileByPath(configPath);
-          if (!(file instanceof TFile)) {
-            new Notice("Could not find unit-density rules file.");
-            return;
-          }
-          await this.app.workspace.getLeaf(true).openFile(file);
-        })
-      );
-
-    new Setting(body)
-      .setName("Unit alias rules library")
-      .setDesc(`Rules file: ${UNIT_ALIAS_CONFIG_PATH}`)
-      .addButton((btn) =>
-        btn.setButtonText("Open Unit Aliases").onClick(async () => {
-          await this.plugin.ensureUnitAliasConfigFile();
-          const configPath = normalizePath(UNIT_ALIAS_CONFIG_PATH);
-          const file = this.app.vault.getAbstractFileByPath(configPath);
-          if (!(file instanceof TFile)) {
-            new Notice("Could not find unit alias rules file.");
-            return;
-          }
-          await this.app.workspace.getLeaf(true).openFile(file);
-        })
-      );
-  }
 }
 
 module.exports = WeeklyMealShopperPlugin;

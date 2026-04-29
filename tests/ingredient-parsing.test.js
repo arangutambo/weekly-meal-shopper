@@ -83,6 +83,13 @@ test("transcribed ingredient normalization expands pecans to pecan nuts", () => 
   assert.equal(line, "70 g chopped pecan nuts");
 });
 
+test("transcribed ingredient normalization keeps explicit countable units like can in metric mode", () => {
+  const plugin = new PluginClass();
+  plugin.settings = { ingredientLineTemplate: "{{Amount}} {{Unit}} {{Ingredient}}" };
+  const [line] = plugin.normalizeTranscribedIngredientLines(["1 can chickpeas"], { metricMode: true });
+  assert.equal(line, "1 can chickpeas");
+});
+
 test("transcribed direction normalization aligns generic nuts to ingredient names", () => {
   const plugin = new PluginClass();
   const ingredientLines = ["70 g chopped pecan nuts or walnuts"];

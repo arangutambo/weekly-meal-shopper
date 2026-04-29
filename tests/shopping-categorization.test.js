@@ -33,3 +33,14 @@ test("regressions: pantry/protein/spices staples are classified correctly", () =
     assert.equal(classified.category, expected);
   }
 });
+
+test("moveArrayItem reorders category rows for drag-and-drop saving", () => {
+  assert.deepEqual(
+    Array.from(ctx.moveArrayItem(["A", "B", "C", "D"], 1, 3)),
+    ["A", "C", "D", "B"]
+  );
+  assert.deepEqual(
+    Array.from(ctx.moveArrayItem(["A", "B", "C", "D"], 3, 1)),
+    ["A", "D", "B", "C"]
+  );
+});

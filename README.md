@@ -4,6 +4,24 @@ Weekly Meal Shopper standardizes recipe notes, parses ingredient metadata, and g
 
 The plugin ships with its own private starter templates inside the plugin folder. You do not need to configure Obsidian's Templates core plugin to use the recipe note or meal-prep canvas commands.
 
+## First Start
+
+On a fresh install, start here:
+
+1. Open `Settings -> Weekly Meal Shopper`.
+2. Go to `First-Time Setup` at the bottom of the settings page.
+3. Click `Run First-Time Setup`.
+4. Choose where the editable canvas template and editable recipe template should live in your vault.
+5. The plugin will automatically populate both files from its bundled base templates.
+6. Use `Open Canvas Template` and `Open Recipe Template` if you want to customize those editable vault copies before creating anything.
+
+After that, the normal workflow is:
+
+1. Run `Create weekly meal-prep canvas` to create a new weekly canvas from your editable canvas template.
+2. Run `Create recipe note from template` whenever you want a new recipe note from your editable recipe template.
+3. Add recipe file cards to the weekly canvas.
+4. Run `Generate weekly shopping list from meal-plan canvas`.
+
 ## Modes
 
 - Basic: recipe view, ingredient parsing/standardization, URL + image transcription into recipe templates.
@@ -31,16 +49,16 @@ Plugin-owned template files:
 - `.obsidian/plugins/weekly-meal-shopper/templates/recipe-template.md`
 - `.obsidian/plugins/weekly-meal-shopper/templates/meal-prep-canvas-template.canvas`
 
-On a fresh install, these files are already present in the plugin. The commands create normal vault files from those plugin-owned templates.
+On a fresh install, these files are already present in the plugin. `Run First-Time Setup` copies them into the editable vault paths you choose, and the creation commands use those editable vault copies.
 
 ## 5-Minute Quick Start
 
-1. Open plugin settings and enable both `Basic` and `Meal Prep` mode features.
-2. Set `Recipe folder`, `Transcribe recipes from image folder`, `Transcription output recipe folder`, and `Weekly meal-plan canvas`.
-3. Run `Create weekly meal-prep canvas` to create a new weekly canvas from the plugin's bundled canvas template and auto-set it.
-4. Run `Create recipe note from template` whenever you want a new recipe note from the plugin's bundled recipe template.
-5. Turn on `Delete transcribed source images` if you want the inbox images removed after successful conversion.
-6. Run `Standardize recipe formats in configured folder`.
+1. Open plugin settings and run `Run First-Time Setup`.
+2. Choose where the editable recipe template and editable meal-prep canvas template should live in your vault.
+3. Enable the `Basic` and `Meal Prep` features you want to use.
+4. Set `Recipe folder`, `Transcribe recipes from image folder`, `Transcription output recipe folder`, and `Weekly meal-plan canvas`.
+5. Run `Create weekly meal-prep canvas`.
+6. Run `Create recipe note from template` whenever you want a new recipe note.
 7. Open your canvas and place recipe file cards.
 8. Run `Generate weekly shopping list from meal-plan canvas`.
 
@@ -78,18 +96,11 @@ Shopping list output supports:
 - Unit alias rules:
   - `.obsidian/plugins/weekly-meal-shopper/unit-aliases.json`
 
-All files are editable and can be opened from plugin settings.
-
 ## Safety + Reliability
 
 - Transcription API requests include retry/backoff for rate limits/server errors.
 - URL transcription creates a fallback recipe template if transcription fails.
 - Parsed ingredient metadata is cached by file mtime/size to avoid unnecessary re-parsing.
-
-## Settings Import/Export
-
-- Export full plugin settings JSON for backup/presets.
-- Import the same JSON back into settings from a configurable path.
 
 ## Publish Assets (recommended)
 

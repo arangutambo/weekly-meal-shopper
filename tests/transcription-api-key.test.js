@@ -10,6 +10,7 @@ test("resolveTranscriptionApiKey falls back to persisted settings and strips a B
   const plugin = new PluginClass();
   plugin.settings = {
     transcriptionApiKey: "",
+    useStoredTranscriptionApiKey: true,
   };
   plugin.loadData = async () => ({
     openaiApiKey: "Bearer sk-test-123",
@@ -18,4 +19,19 @@ test("resolveTranscriptionApiKey falls back to persisted settings and strips a B
   const key = await plugin.resolveTranscriptionApiKey();
 
   assert.equal(key, "sk-test-123");
+});
+
+test("resolveTranscriptionApiKey ignores persisted stored keys when the toggle is off", async () => {
+  const plugin = new PluginClass();
+  plugin.settings = {
+    transcriptionApiKey: "",
+    useStoredTranscriptionApiKey: false,
+  };
+  plugin.loadData = async () => ({
+    openaiApiKey: "Bearer sk-test-123",
+  });
+
+  const key = await plugin.resolveTranscriptionApiKey();
+
+  assert.equal(key, "");
 });
