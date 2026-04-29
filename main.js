@@ -4550,19 +4550,16 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
   buildFoldableSection(containerEl, { title, description, searchPlaceholder }) {
     const section = containerEl.createDiv({ cls: "weekly-meal-shopper-list-section weekly-meal-shopper-foldable is-collapsed" });
-    const header = section.createEl("button", {
+    const header = section.createDiv({
       cls: "weekly-meal-shopper-foldable-toggle weekly-meal-shopper-heading is-collapsed",
     });
-    header.type = "button";
+    header.tabIndex = 0;
+    header.setAttribute("role", "button");
     header.setAttribute("aria-expanded", "false");
 
     const titleRow = header.createDiv({ cls: "weekly-meal-shopper-heading-title-row" });
     titleRow.createSpan({ cls: "weekly-meal-shopper-collapse-indicator", text: "▶" });
     titleRow.createSpan({ cls: "weekly-meal-shopper-heading-title", text: title });
-
-    if (description) {
-      header.createDiv({ cls: "weekly-meal-shopper-heading-description", text: description });
-    }
 
     const body = section.createDiv({ cls: "weekly-meal-shopper-foldable-body" });
     body.style.display = "none";
@@ -4602,9 +4599,6 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
   renderCategoryHeading(containerEl, { title, description = "" }) {
     containerEl.createEl("h3", { text: title });
-    if (description) {
-      containerEl.createEl("p", { text: description, cls: "weekly-meal-shopper-help" });
-    }
   }
 
   async display() {
@@ -5048,7 +5042,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
     const { body: firstTimeSetupBody } = this.buildFoldableSection(containerEl, {
       stateKey: "firstTimeSetupCollapsed",
-      title: "Template setup",
+      title: "First-Time Setup",
       description: "The setup popup saves both vault locations and populates both editable templates from the bundled plugin base.",
     });
 
@@ -5251,7 +5245,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
   renderExcludedIngredientsSection(containerEl, categories) {
     const { body, searchInput } = this.buildFoldableSection(containerEl, {
       stateKey: "excludeIngredientsCollapsed",
-      title: "Exclude ingredients (exact names)",
+      title: "Exclude Ingredients",
       description: "Exact match exclusions for shopping list names.",
       searchPlaceholder: "Search excluded ingredients",
     });
@@ -5323,7 +5317,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
   renderIngredientOverridesSection(containerEl, categories) {
     const { body, searchInput } = this.buildFoldableSection(containerEl, {
       stateKey: "ingredientOverridesCollapsed",
-      title: "Ingredient overrides (exact)",
+      title: "Ingredient Categories",
       description: "Override category and optional output unit per ingredient.",
       searchPlaceholder: "Search ingredient overrides",
     });

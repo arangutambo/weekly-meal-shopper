@@ -10,12 +10,14 @@
 
 .weekly-meal-shopper-foldable-toggle {
   width: 100%;
+  display: block;
   text-align: left;
   background: transparent;
   border: 0;
   box-shadow: none;
   padding: 0;
   color: inherit;
+  cursor: pointer;
 }
 
 .weekly-meal-shopper-foldable-toggle:hover,
@@ -26,10 +28,8 @@
 }
 
 .weekly-meal-shopper-heading {
-  cursor: pointer;
-  margin-bottom: 18px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 10px;
+  padding: 0;
 }
 
 .weekly-meal-shopper-heading.is-collapsed {
@@ -39,22 +39,16 @@
 .weekly-meal-shopper-heading-title-row {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .weekly-meal-shopper-heading-title {
   font-weight: 600;
 }
 
-.weekly-meal-shopper-heading-description {
-  margin-top: 4px;
-  color: var(--text-muted);
-  line-height: var(--line-height-tight);
-}
-
 .weekly-meal-shopper-collapse-indicator {
   color: var(--text-faint);
   display: inline-block;
-  margin-right: 8px;
   position: relative;
   top: -1px;
   font-size: 10px;
@@ -67,7 +61,7 @@
 }
 
 .weekly-meal-shopper-foldable-body {
-  padding-left: 24px;
+  padding-left: 20px;
   padding-bottom: 16px;
 }
 
