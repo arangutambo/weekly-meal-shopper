@@ -4,6 +4,8 @@ Weekly Meal Shopper standardizes recipe notes, parses ingredient metadata, and g
 
 The plugin ships with its own private starter templates inside the plugin folder. You do not need to configure Obsidian's Templates core plugin to use the recipe note or meal-prep canvas commands.
 
+Support the project: [Buy Me a Coffee](https://buymeacoffee.com/tonyhad)
+
 ## First Start
 
 On a fresh install, start here:
