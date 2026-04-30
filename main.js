@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS = {
   recipeFolder: "pages/Food and Drink/Recipes",
   measurementPreset: "vault_standard",
   measurementPreference: "weight",
+  convertLiquidVolumeMeasuresToWeight: true,
   cupMl: 250,
   tbspMl: 15,
   tspMl: 5,
@@ -238,6 +239,7 @@ let ACTIVE_MEASUREMENT_PROFILE = resolveMeasurementProfile({
 });
 let ACTIVE_UNIT_MAP = buildUnitMapFromProfile(ACTIVE_MEASUREMENT_PROFILE);
 let ACTIVE_MEASUREMENT_PREFERENCE = "weight";
+let ACTIVE_CONVERT_LIQUID_VOLUME_TO_WEIGHT = true;
 const DEFAULT_INGREDIENT_LINE_TEMPLATE = "{{Amount}} {{Unit}} {{Ingredient}}";
 let ACTIVE_INGREDIENT_LINE_TEMPLATE = DEFAULT_INGREDIENT_LINE_TEMPLATE;
 
@@ -246,6 +248,7 @@ function setActiveMeasurementProfile(settings) {
   ACTIVE_UNIT_MAP = buildUnitMapFromProfile(ACTIVE_MEASUREMENT_PROFILE);
   const pref = normalizeSearchText(settings?.measurementPreference);
   ACTIVE_MEASUREMENT_PREFERENCE = pref === "volume" ? "volume" : "weight";
+  ACTIVE_CONVERT_LIQUID_VOLUME_TO_WEIGHT = settings?.convertLiquidVolumeMeasuresToWeight !== false;
 }
 
 function normalizeUnitAliasConfig(raw) {
@@ -302,7 +305,9 @@ function applyMeasurementPreferenceToParsedItem(parsed, { preferWeight = ACTIVE_
   if (!parsed || typeof parsed !== "object") return parsed;
   if (parsed.unitMetric !== "ml") return parsed;
   const explicitVolumeUnit = canonicalVolumeUnit(parsed.unit);
-  const autoConvertLiquidVolume = !!explicitVolumeUnit && isLikelyLiquidIngredient(parsed.name);
+  const autoConvertLiquidVolume = ACTIVE_CONVERT_LIQUID_VOLUME_TO_WEIGHT
+    && !!explicitVolumeUnit
+    && isLikelyLiquidIngredient(parsed.name);
   if (!preferWeight && !autoConvertLiquidVolume) return parsed;
   const density = estimateIngredientDensityGPerMl(parsed.name);
   if (!Number.isFinite(density) || density <= 0) return parsed;
@@ -2396,6 +2401,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.measurementPreference = normalizeSearchText(this.settings.measurementPreference) === "volume"
       ? "volume"
       : "weight";
+    this.settings.convertLiquidVolumeMeasuresToWeight = this.settings.convertLiquidVolumeMeasuresToWeight !== false;
     this.settings.cupShorthand = normalizeSingleLineText(this.settings.cupShorthand || "cup") || "cup";
     this.settings.tbspShorthand = normalizeSingleLineText(this.settings.tbspShorthand || "tbsp") || "tbsp";
     this.settings.tspShorthand = normalizeSingleLineText(this.settings.tspShorthand || "tsp") || "tsp";
@@ -4775,6 +4781,18 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
             const n = Number(value);
             this.plugin.settings.tspMl = Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : this.plugin.settings.tspMl;
             this.plugin.settings.measurementPreset = "custom";
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(ingredientFormatBody)
+      .setName("Convert liquid cup/tbsp/tsp to grams")
+      .setDesc("For liquid-style ingredients, prefer whole-gram weight output instead of volume spoon/cup measures.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.convertLiquidVolumeMeasuresToWeight !== false)
+          .onChange(async (value) => {
+            this.plugin.settings.convertLiquidVolumeMeasuresToWeight = value;
             await this.plugin.saveSettings();
           })
       );

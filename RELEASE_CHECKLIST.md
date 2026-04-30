@@ -3,8 +3,6 @@
 ## Pre-Release
 
 - [ ] Bump `manifest.json` version using semver.
-- [ ] Update `CHANGELOG.md` with release notes.
-- [ ] Update `MIGRATION_NOTES.md` for the target version.
 - [ ] Validate `minAppVersion` compatibility.
 - [ ] Confirm command IDs unchanged (or document migrations).
 - [ ] Verify settings import/export path and behavior.
@@ -12,8 +10,6 @@
 
 ## Functional QA
 
-- [ ] Basic mode OFF hides/disables basic commands behaviorally.
-- [ ] Meal Prep mode OFF hides/disables meal-prep commands behaviorally.
 - [ ] Parse command updates both metadata and direction bolding.
 - [ ] Recipe view step highlighting matches ingredient mentions.
 - [ ] Shopping list generation includes category reasons and override links (if enabled).
@@ -31,8 +27,6 @@
 - [ ] README command list is accurate.
 - [ ] Quick start steps verified in clean vault.
 - [ ] GIF demos updated.
-- [ ] Roadmap/status docs updated.
-- [ ] Sample vault + sample canvas assets updated.
 
 ## Distribution
 
