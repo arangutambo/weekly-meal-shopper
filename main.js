@@ -24,10 +24,8 @@ const DEFAULT_SETTINGS = {
   cupMl: 250,
   tbspMl: 15,
   tspMl: 5,
-  cupShorthand: "cup",
-  tbspShorthand: "tbsp",
-  tspShorthand: "tsp",
-  ingredientLineTemplate: "{{Amount}} {{Unit}} {{Ingredient}}",
+  ingredientStorageSeparator: ";",
+  recipeViewIngredientDisplayTemplate: "{{Amount}} {{Unit}} {{Ingredient}}{{PreparationSuffix}}",
   transcriptionMetricOutput: true,
   useStoredTranscriptionApiKey: false,
   parsedIngredientsField: "IngredientsParsed",
@@ -43,16 +41,14 @@ const DEFAULT_SETTINGS = {
   transcriptionModel: "gpt-4.1-mini",
   recipeTemplateVaultPath: "Templates/Weekly Meal Shopper/Recipe Template.md",
   mealPrepCanvasTemplateVaultPath: "Templates/Weekly Meal Shopper/Meal Prep Canvas Template.canvas",
-  showCategoryReasonsInShoppingList: true,
+  showRecipeUsageInShoppingList: true,
   includeOverrideLinksInShoppingList: false,
-  settingsImportExportPath: ".obsidian/plugins/weekly-meal-shopper/settings-export.json",
   settingsSectionState: {
     firstTimeSetupCollapsed: false,
     mealPrepSetupCollapsed: false,
     recipeSetupCollapsed: false,
     ingredientFormatCollapsed: false,
     recipeTranscriptionCollapsed: false,
-    settingsImportExportCollapsed: false,
     shoppingCategoriesCollapsed: false,
     excludeIngredientsCollapsed: false,
     ingredientOverridesCollapsed: false,
@@ -182,15 +178,12 @@ function resolveMeasurementProfile(settings) {
   const cupMl = readMl(settings?.cupMl, preset.cupMl);
   const tbspMl = readMl(settings?.tbspMl, preset.tbspMl);
   const tspMl = readMl(settings?.tspMl, preset.tspMl);
-  const cupLabel = normalizeSingleLineText(settings?.cupShorthand) || "cup";
-  const tbspLabel = normalizeSingleLineText(settings?.tbspShorthand) || "tbsp";
-  const tspLabel = normalizeSingleLineText(settings?.tspShorthand) || "tsp";
   return {
     presetKey,
     cupMl,
     tbspMl,
     tspMl,
-    labels: { cup: cupLabel, tbsp: tbspLabel, tsp: tspLabel },
+    labels: { cup: "cup", tbsp: "tbsp", tsp: "tsp" },
   };
 }
 
@@ -201,6 +194,14 @@ function canonicalVolumeUnit(rawUnit) {
   if (["tbsp", "tbs", "tablespoon", "tablespoons"].includes(unit)) return "tbsp";
   if (["tsp", "teaspoon", "teaspoons"].includes(unit)) return "tsp";
   return "";
+}
+
+function formatVolumeUnitLabel(canonical, amount, outputLabels = ACTIVE_MEASUREMENT_PROFILE.labels) {
+  if (canonical === "cup") {
+    return Math.abs(Number(amount || 0) - 1) < 1e-9 ? "cup" : "cups";
+  }
+  if (canonical && outputLabels?.[canonical]) return outputLabels[canonical];
+  return canonical || "";
 }
 
 function buildUnitMapFromProfile(profile) {
@@ -233,21 +234,32 @@ let ACTIVE_MEASUREMENT_PROFILE = resolveMeasurementProfile({
   cupMl: 250,
   tbspMl: 15,
   tspMl: 5,
-  cupShorthand: "cup",
-  tbspShorthand: "tbsp",
-  tspShorthand: "tsp",
 });
 let ACTIVE_UNIT_MAP = buildUnitMapFromProfile(ACTIVE_MEASUREMENT_PROFILE);
 let ACTIVE_MEASUREMENT_PREFERENCE = "weight";
 let ACTIVE_CONVERT_LIQUID_VOLUME_TO_WEIGHT = true;
-const DEFAULT_INGREDIENT_LINE_TEMPLATE = "{{Amount}} {{Unit}} {{Ingredient}}";
-let ACTIVE_INGREDIENT_LINE_TEMPLATE = DEFAULT_INGREDIENT_LINE_TEMPLATE;
+const STRUCTURED_INGREDIENT_SEPARATORS = [";", ",", ":", "|"];
+const DEFAULT_INGREDIENT_STORAGE_SEPARATOR = ";";
+const DEFAULT_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE = "{{Amount}} {{Unit}} {{Ingredient}}{{PreparationSuffix}}";
+let ACTIVE_INGREDIENT_STORAGE_SEPARATOR = DEFAULT_INGREDIENT_STORAGE_SEPARATOR;
+let ACTIVE_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE = DEFAULT_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE;
+
+function normalizeMeasurementPreference(value) {
+  const pref = normalizeSearchText(value);
+  if (pref === "volume") return "volume";
+  if (pref === "both") return "both";
+  return "weight";
+}
+
+function shouldPreferWeightMeasurements(preference) {
+  const pref = normalizeMeasurementPreference(preference);
+  return pref === "weight" || pref === "both";
+}
 
 function setActiveMeasurementProfile(settings) {
   ACTIVE_MEASUREMENT_PROFILE = resolveMeasurementProfile(settings);
   ACTIVE_UNIT_MAP = buildUnitMapFromProfile(ACTIVE_MEASUREMENT_PROFILE);
-  const pref = normalizeSearchText(settings?.measurementPreference);
-  ACTIVE_MEASUREMENT_PREFERENCE = pref === "volume" ? "volume" : "weight";
+  ACTIVE_MEASUREMENT_PREFERENCE = normalizeMeasurementPreference(settings?.measurementPreference);
   ACTIVE_CONVERT_LIQUID_VOLUME_TO_WEIGHT = settings?.convertLiquidVolumeMeasuresToWeight !== false;
 }
 
@@ -265,16 +277,25 @@ function normalizeUnitAliasConfig(raw) {
   };
 }
 
-function normalizeIngredientLineTemplate(template) {
+function normalizeIngredientStorageSeparator(separator) {
+  const raw = String(separator || "").trim();
+  return STRUCTURED_INGREDIENT_SEPARATORS.includes(raw) ? raw : DEFAULT_INGREDIENT_STORAGE_SEPARATOR;
+}
+
+function setActiveIngredientStorageSeparator(separator) {
+  ACTIVE_INGREDIENT_STORAGE_SEPARATOR = normalizeIngredientStorageSeparator(separator);
+}
+
+function normalizeRecipeViewIngredientDisplayTemplate(template) {
   const raw = normalizeSingleLineText(template);
   if (!raw || !/{{\s*ingredient\s*}}/i.test(raw)) {
-    return DEFAULT_INGREDIENT_LINE_TEMPLATE;
+    return DEFAULT_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE;
   }
   return raw;
 }
 
-function setActiveIngredientLineTemplate(template) {
-  ACTIVE_INGREDIENT_LINE_TEMPLATE = normalizeIngredientLineTemplate(template);
+function setActiveRecipeViewIngredientDisplayTemplate(template) {
+  ACTIVE_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE = normalizeRecipeViewIngredientDisplayTemplate(template);
 }
 
 function buildDensityEntries(mapLike) {
@@ -301,7 +322,10 @@ function isLikelyLiquidIngredient(name) {
   return /\b(water|stock|broth|vinegar|milk|juice|oil|yogurt|yoghurt|syrup|molasses|honey|brine)\b/.test(text);
 }
 
-function applyMeasurementPreferenceToParsedItem(parsed, { preferWeight = ACTIVE_MEASUREMENT_PREFERENCE === "weight" } = {}) {
+function applyMeasurementPreferenceToParsedItem(
+  parsed,
+  { preferWeight = shouldPreferWeightMeasurements(ACTIVE_MEASUREMENT_PREFERENCE) } = {}
+) {
   if (!parsed || typeof parsed !== "object") return parsed;
   if (parsed.unitMetric !== "ml") return parsed;
   const explicitVolumeUnit = canonicalVolumeUnit(parsed.unit);
@@ -341,6 +365,45 @@ const PREPARATION_ONLY_WORDS = new Set([
   "pitted",
   "cored",
 ]);
+
+const TRAILING_PREPARATION_PHRASES = [
+  "drained and rinsed",
+  "rinsed and drained",
+  "roughly chopped",
+  "finely chopped",
+  "coarsely chopped",
+  "roughly diced",
+  "finely diced",
+  "finely sliced",
+  "thinly sliced",
+  "finely grated",
+  "roughly grated",
+  "lightly beaten",
+  "room temperature",
+  "to serve",
+  "for serving",
+  "for garnish",
+  "as needed",
+  "to taste",
+  "optional",
+  "chopped",
+  "diced",
+  "minced",
+  "sliced",
+  "grated",
+  "crushed",
+  "peeled",
+  "zested",
+  "juiced",
+  "drained",
+  "rinsed",
+  "softened",
+  "melted",
+  "thawed",
+  "pitted",
+  "cored",
+  "beaten",
+].sort((a, b) => b.length - a.length);
 
 const INGREDIENT_DESCRIPTOR_WORDS = new Set([
   "all",
@@ -681,9 +744,256 @@ function normalizeUnit(rawUnit, unitMap = ACTIVE_UNIT_MAP) {
   return unitMap[normalized] || { rawUnit: normalized, baseUnit: "unit", factor: 1 };
 }
 
-function parseIngredientLine(line, unitMap = ACTIVE_UNIT_MAP) {
+function splitIngredientNameAndPreparation(text) {
+  const source = String(text || "").replace(/\s+/g, " ").trim();
+  if (!source) return { ingredientName: "", preparation: "" };
+
+  const commaIdx = source.indexOf(",");
+  if (commaIdx !== -1) {
+    return {
+      ingredientName: cleanIngredientName(source.slice(0, commaIdx)),
+      preparation: cleanIngredientName(source.slice(commaIdx + 1)),
+    };
+  }
+
+  for (const phrase of TRAILING_PREPARATION_PHRASES) {
+    const phrasePattern = escapeRegExp(phrase).replace(/\s+/g, "\\s+");
+    const match = source.match(new RegExp(`^(.*?)(?:\\s+)(${phrasePattern})$`, "i"));
+    if (!match) continue;
+    const ingredientName = cleanIngredientName(match[1]);
+    const preparation = cleanIngredientName(match[2]);
+    if (!ingredientName || looksLikePreparationOnlyName(ingredientName)) continue;
+    return { ingredientName, preparation };
+  }
+
+  return {
+    ingredientName: cleanIngredientName(source),
+    preparation: "",
+  };
+}
+
+function splitStructuredIngredientSlots(text, preferredSeparator = ACTIVE_INGREDIENT_STORAGE_SEPARATOR) {
+  const source = String(text || "").replace(/^[-*+]\s+/, "").trim();
+  if (!source) return null;
+
+  const candidates = [
+    normalizeIngredientStorageSeparator(preferredSeparator),
+    ...STRUCTURED_INGREDIENT_SEPARATORS,
+  ];
+  const seen = new Set();
+
+  for (const separator of candidates) {
+    if (!separator || seen.has(separator)) continue;
+    seen.add(separator);
+    const parts = source.split(separator);
+    if (parts.length !== 4) continue;
+    return {
+      separator,
+      slots: parts.map((part) => normalizeSingleLineText(part)),
+    };
+  }
+
+  return null;
+}
+
+function hasStructuredIngredientLineFormat(line) {
+  return !!splitStructuredIngredientSlots(line);
+}
+
+function buildIngredientRenderFields(
+  parsed,
+  {
+    metricMode = false,
+    measurementPreference = ACTIVE_MEASUREMENT_PREFERENCE,
+    preferWeight = shouldPreferWeightMeasurements(measurementPreference),
+    outputLabels = ACTIVE_MEASUREMENT_PROFILE.labels,
+  } = {}
+) {
+  if (!parsed || typeof parsed !== "object") {
+    return {
+      amount: "",
+      unit: "",
+      ingredient: "",
+      preparation: "",
+      preparationSuffix: "",
+    };
+  }
+
+  const normalizedPreference = normalizeMeasurementPreference(measurementPreference);
+  const effective = applyMeasurementPreferenceToParsedItem(parsed, { preferWeight });
+  const prep = normalizeSingleLineText(effective.preparation || "");
+  let amount = "";
+  let unit = "";
+
+  if (!effective.quantityUnknown) {
+    const useMetricValues = metricMode
+      || (normalizedPreference === "weight" && effective.unitMetric === "g" && parsed.unitMetric === "ml");
+
+    if (useMetricValues) {
+      if (effective.unitMetric === "unit") {
+        amount = formatMetricAmount(effective.amount);
+        unit = effective.unitExplicit ? effective.unit : "";
+      } else {
+        amount = formatMetricAmount(effective.amountMetric);
+        unit = effective.unitMetric;
+      }
+    } else {
+      amount = formatMetricAmount(parsed.amount);
+      if (parsed.unitExplicit) {
+        const canonical = canonicalVolumeUnit(parsed.unit);
+        unit = canonical ? formatVolumeUnitLabel(canonical, parsed.amount, outputLabels) : parsed.unit;
+      }
+    }
+  }
+
+  if (unit && isDuplicateCountUnit(unit, effective.name)) {
+    unit = "";
+  }
+
+  return {
+    amount,
+    unit,
+    ingredient: normalizeSingleLineText(effective.name),
+    preparation: prep,
+    preparationSuffix: prep ? `, ${prep}` : "",
+  };
+}
+
+function formatRecipeViewIngredientDisplay(
+  parsed,
+  {
+    template = ACTIVE_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE,
+    outputLabels = ACTIVE_MEASUREMENT_PROFILE.labels,
+  } = {}
+) {
+  const templateToUse = normalizeRecipeViewIngredientDisplayTemplate(template);
+  const fields = buildIngredientRenderFields(parsed, {
+    metricMode: false,
+    measurementPreference: "volume",
+    preferWeight: false,
+    outputLabels,
+  });
+  const replacements = {
+    amount: fields.amount,
+    unit: fields.unit,
+    ingredient: fields.ingredient,
+    preparation: fields.preparation,
+    preparationsuffix: fields.preparationSuffix,
+  };
+
+  let line = templateToUse.replace(/{{\s*(amount|unit|ingredient|preparation|preparationsuffix)\s*}}/gi, (_match, key) => {
+    const normalizedKey = normalizeSearchText(key);
+    return Object.prototype.hasOwnProperty.call(replacements, normalizedKey) ? replacements[normalizedKey] : "";
+  });
+
+  line = line
+    .replace(/\s+,/g, ",")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!line) line = fields.ingredient;
+  if (
+    fields.preparation
+    && !/{{\s*preparation\s*}}/i.test(templateToUse)
+    && !/{{\s*preparationsuffix\s*}}/i.test(templateToUse)
+  ) {
+    line = `${line}, ${fields.preparation}`;
+  }
+
+  return line;
+}
+
+function formatStructuredIngredientLineFromParsed(
+  parsed,
+  {
+    separator = ACTIVE_INGREDIENT_STORAGE_SEPARATOR,
+    metricMode = false,
+    measurementPreference = ACTIVE_MEASUREMENT_PREFERENCE,
+    outputLabels = ACTIVE_MEASUREMENT_PROFILE.labels,
+  } = {}
+) {
+  if (!parsed) return "";
+  const fields = buildIngredientRenderFields(parsed, {
+    metricMode,
+    measurementPreference,
+    preferWeight: metricMode ? true : shouldPreferWeightMeasurements(measurementPreference),
+    outputLabels,
+  });
+  const normalizedSeparator = normalizeIngredientStorageSeparator(separator);
+  const slots = [
+    fields.amount,
+    fields.unit,
+    fields.ingredient,
+    fields.preparation,
+  ];
+  const normalizedSlots = slots.map((slot) => normalizeSingleLineText(slot));
+  let rendered = "";
+  for (let i = 0; i < normalizedSlots.length; i += 1) {
+    const slot = normalizedSlots[i];
+    if (i > 0) rendered += " ";
+    rendered += slot;
+    if (i < normalizedSlots.length - 1) rendered += normalizedSeparator;
+  }
+  rendered = rendered.replace(/\s+$/, "");
+  return `- ${rendered}`;
+}
+
+function parseIngredientLine(line, unitMap = ACTIVE_UNIT_MAP, options = {}) {
+  const allowLegacy = options?.allowLegacy !== false;
   let text = line.replace(/^[-*+]\s+/, "").trim();
   if (!text) return null;
+
+  const structured = splitStructuredIngredientSlots(text, options?.preferredSeparator);
+  if (structured) {
+    const [amountSlot, unitSlot, ingredientSlot, preparationSlot] = structured.slots;
+    const ingredientName = cleanIngredientName(ingredientSlot);
+    const preparation = cleanIngredientName(preparationSlot);
+    if (!ingredientName) return null;
+
+    let amount = 1;
+    let quantityUnknown = true;
+    let amountMetric = 0;
+    if (amountSlot) {
+      const parsedAmount = parseAmountFromStart(amountSlot);
+      if (!parsedAmount || normalizeSingleLineText(parsedAmount.rest)) return null;
+      amount = Number(parsedAmount.amount.toFixed(2));
+      quantityUnknown = false;
+    }
+
+    const cleanedUnitSlot = normalizeSingleLineText(unitSlot);
+    const normalizedUnitToken = normalizeSearchText(cleanedUnitSlot).replace(/\.$/, "");
+    const knownUnit = cleanedUnitSlot && unitMap[normalizedUnitToken]
+      ? normalizeUnit(cleanedUnitSlot, unitMap)
+      : null;
+    const unitExplicit = !!cleanedUnitSlot;
+    const unit = unitExplicit ? cleanedUnitSlot : "";
+
+    if (!quantityUnknown) {
+      if (knownUnit) {
+        amountMetric = Number((amount * knownUnit.factor).toFixed(2));
+      } else {
+        amountMetric = Number(amount.toFixed(2));
+      }
+    }
+
+    return {
+      name: ingredientName,
+      preparation,
+      amount,
+      unit,
+      unitExplicit,
+      quantityUnknown,
+      amountMetric,
+      unitMetric: knownUnit?.baseUnit || "unit",
+      canonicalName: canonicalIngredientName(ingredientName),
+      source: line,
+      isStructured: true,
+      separator: structured.separator,
+    };
+  }
+
+  if (!allowLegacy) return null;
 
   text = text.replace(/\([^)]*oz[^)]*\)/gi, "").trim();
   // Support compact quantity+unit formats like "150g", "1kg", "250ml".
@@ -692,15 +1002,7 @@ function parseIngredientLine(line, unitMap = ACTIVE_UNIT_MAP) {
 
   const amountResult = parseAmountFromStart(text);
   if (!amountResult) {
-    let ingredientName = text;
-    let preparation = "";
-    const commaIdx = ingredientName.indexOf(",");
-    if (commaIdx !== -1) {
-      preparation = ingredientName.slice(commaIdx + 1).trim();
-      ingredientName = ingredientName.slice(0, commaIdx).trim();
-    }
-    ingredientName = cleanIngredientName(ingredientName);
-    preparation = cleanIngredientName(preparation);
+    const { ingredientName, preparation } = splitIngredientNameAndPreparation(text);
     if (!ingredientName) return null;
     return {
       name: ingredientName,
@@ -713,6 +1015,7 @@ function parseIngredientLine(line, unitMap = ACTIVE_UNIT_MAP) {
       unitMetric: "unit",
       canonicalName: canonicalIngredientName(ingredientName),
       source: line,
+      isStructured: false,
     };
   }
 
@@ -732,19 +1035,13 @@ function parseIngredientLine(line, unitMap = ACTIVE_UNIT_MAP) {
   let ingredientName = restParts.slice(nameStartIdx).join(" ");
   if (!ingredientName) ingredientName = restParts.join(" ");
 
-  let preparation = "";
-  const commaIdx = ingredientName.indexOf(",");
-  if (commaIdx !== -1) {
-    preparation = ingredientName.slice(commaIdx + 1).trim();
-    ingredientName = ingredientName.slice(0, commaIdx).trim();
-  }
-
   ingredientName = ingredientName
     .replace(/^[,\-:]+/, "")
     .trim();
 
-  ingredientName = cleanIngredientName(ingredientName);
-  preparation = cleanIngredientName(preparation);
+  const split = splitIngredientNameAndPreparation(ingredientName);
+  ingredientName = split.ingredientName;
+  const preparation = split.preparation;
   if (!ingredientName) return null;
 
   const amountMetric = Number((amountResult.amount * unitInfo.factor).toFixed(2));
@@ -760,6 +1057,7 @@ function parseIngredientLine(line, unitMap = ACTIVE_UNIT_MAP) {
     unitMetric: unitInfo.baseUnit,
     canonicalName: canonicalIngredientName(ingredientName),
     source: line,
+    isStructured: false,
   };
 }
 
@@ -843,35 +1141,48 @@ function extractIngredientsSection(content) {
 function formatIngredientLineFromParsed(
   parsed,
   {
-    template = ACTIVE_INGREDIENT_LINE_TEMPLATE,
+    template = ACTIVE_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE,
     metricMode = false,
-    preferWeight = ACTIVE_MEASUREMENT_PREFERENCE === "weight",
+    measurementPreference = ACTIVE_MEASUREMENT_PREFERENCE,
     outputLabels = ACTIVE_MEASUREMENT_PROFILE.labels,
   } = {}
 ) {
   if (!parsed) return "";
-  const effective = applyMeasurementPreferenceToParsedItem(parsed, { preferWeight });
+  const normalizedPreference = normalizeMeasurementPreference(measurementPreference);
+  const effective = applyMeasurementPreferenceToParsedItem(parsed, {
+    preferWeight: shouldPreferWeightMeasurements(measurementPreference),
+  });
 
   const prep = normalizeSingleLineText(effective.preparation || "");
   let amount = "";
   let unit = "";
-  const usingWeightMetric = effective.unitMetric === "g" && parsed.unitMetric === "ml";
+  const showingBothMeasurements = normalizedPreference === "both" && !metricMode;
+  const usingWeightMetric = !showingBothMeasurements && effective.unitMetric === "g" && parsed.unitMetric === "ml";
 
   if (!effective.quantityUnknown) {
     if (metricMode || usingWeightMetric) {
       if (effective.unitMetric === "unit") {
         amount = formatMetricAmount(effective.amount);
-        // Keep explicit countable units like "can" or "clove" instead of dropping them in metric mode.
         unit = effective.unitExplicit ? effective.unit : "";
       } else {
         amount = formatMetricAmount(effective.amountMetric);
         unit = effective.unitMetric;
       }
     } else {
-      amount = formatMetricAmount(effective.amount);
-      if (effective.unitExplicit) {
-        const canonical = canonicalVolumeUnit(effective.unit);
-        unit = canonical && outputLabels?.[canonical] ? outputLabels[canonical] : effective.unit;
+      amount = formatMetricAmount(parsed.amount);
+      if (parsed.unitExplicit) {
+        const canonical = canonicalVolumeUnit(parsed.unit);
+        unit = canonical ? formatVolumeUnitLabel(canonical, parsed.amount, outputLabels) : parsed.unit;
+      }
+      if (
+        showingBothMeasurements
+        && parsed.unitMetric === "ml"
+        && effective.unitMetric === "g"
+        && Number.isFinite(Number(effective.amountMetric))
+        && Number(effective.amountMetric) > 0
+      ) {
+        const convertedWeight = `${formatMetricAmount(effective.amountMetric)} g`;
+        unit = unit ? `${unit} (${convertedWeight})` : `(${convertedWeight})`;
       }
     }
   }
@@ -888,11 +1199,10 @@ function formatIngredientLineFromParsed(
     preparationsuffix: prep ? `, ${prep}` : "",
   };
 
-  const templateToUse = normalizeIngredientLineTemplate(template);
-  let line = templateToUse.replace(/{{\s*(amount|unit|ingredient|preparation|preparationsuffix)\s*}}/gi, (match, key) => {
-    const k = normalizeSearchText(key);
-    if (!Object.prototype.hasOwnProperty.call(replacements, k)) return "";
-    return replacements[k];
+  const templateToUse = normalizeRecipeViewIngredientDisplayTemplate(template);
+  let line = templateToUse.replace(/{{\s*(amount|unit|ingredient|preparation|preparationsuffix)\s*}}/gi, (_match, key) => {
+    const normalizedKey = normalizeSearchText(key);
+    return Object.prototype.hasOwnProperty.call(replacements, normalizedKey) ? replacements[normalizedKey] : "";
   });
 
   line = line
@@ -901,7 +1211,11 @@ function formatIngredientLineFromParsed(
     .trim();
 
   if (!line) line = replacements.ingredient;
-  if (prep && !/{{\s*preparation\s*}}/i.test(templateToUse) && !/{{\s*preparationsuffix\s*}}/i.test(templateToUse)) {
+  if (
+    prep
+    && !/{{\s*preparation\s*}}/i.test(templateToUse)
+    && !/{{\s*preparationsuffix\s*}}/i.test(templateToUse)
+  ) {
     line = `${line}, ${prep}`;
   }
   return `- ${line}`;
@@ -911,19 +1225,37 @@ function normalizeIngredientsSectionLines(
   lines,
   unitMap = ACTIVE_UNIT_MAP,
   outputLabels = ACTIVE_MEASUREMENT_PROFILE.labels,
-  template = ACTIVE_INGREDIENT_LINE_TEMPLATE,
-  preferWeight = ACTIVE_MEASUREMENT_PREFERENCE === "weight"
+  separator = ACTIVE_INGREDIENT_STORAGE_SEPARATOR,
+  measurementPreference = ACTIVE_MEASUREMENT_PREFERENCE
 ) {
   if (!Array.isArray(lines)) return [];
   return lines.map((line) => {
     const parsed = parseIngredientLine(line, unitMap);
     if (!parsed) return line;
-    return formatIngredientLineFromParsed(parsed, {
+    return formatStructuredIngredientLineFromParsed(parsed, {
       metricMode: false,
-      preferWeight,
+      measurementPreference,
       outputLabels,
-      template,
+      separator,
     });
+  });
+}
+
+function hasOnlyBlankIngredientSlots(line) {
+  const structured = splitStructuredIngredientSlots(line);
+  return !!structured && structured.slots.every((slot) => !slot);
+}
+
+function isMeaningfulIngredientLine(line) {
+  const text = stripListMarkerText(line);
+  return !!text && !hasOnlyBlankIngredientSlots(line);
+}
+
+function recipeIngredientLinesAreStructured(lines) {
+  const values = Array.isArray(lines) ? lines : [];
+  return values.every((line) => {
+    if (!isMeaningfulIngredientLine(line)) return true;
+    return hasStructuredIngredientLineFormat(line);
   });
 }
 
@@ -934,7 +1266,6 @@ function escapeRegExp(text) {
 function stripPreparationPhrases(name) {
   let cleaned = cleanIngredientName(String(name || ""));
   cleaned = cleaned.replace(/\([^)]*\)/g, "").trim();
-  cleaned = cleaned.replace(/\s*,\s*.*$/, "").trim();
 
   const trailingPhrases = [
     "to taste",
@@ -949,31 +1280,8 @@ function stripPreparationPhrases(name) {
     const re = new RegExp(`\\s+${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
     cleaned = cleaned.replace(re, "").trim();
   }
-
-  const trailingPrepWords = [
-    "bruised",
-    "chopped",
-    "diced",
-    "minced",
-    "sliced",
-    "grated",
-    "crushed",
-    "peeled",
-    "zested",
-    "juiced",
-    "drained",
-    "rinsed",
-    "thawed",
-    "melted",
-    "softened",
-    "warmed",
-  ];
-  const prepWordRegex = new RegExp(`\\s+(?:${trailingPrepWords.join("|")})$`, "i");
-  while (prepWordRegex.test(cleaned)) {
-    cleaned = cleaned.replace(prepWordRegex, "").trim();
-  }
-
-  return cleaned || cleanIngredientName(String(name || ""));
+  const split = splitIngredientNameAndPreparation(cleaned);
+  return split.ingredientName || cleanIngredientName(String(name || ""));
 }
 
 function normalizeShoppingDisplayName(name) {
@@ -982,6 +1290,80 @@ function normalizeShoppingDisplayName(name) {
   cleaned = cleaned.replace(/\bfresh\s+cilantro\b/gi, "fresh coriander");
   cleaned = cleaned.replace(/\bcilantro\b/gi, "coriander");
   return cleaned.replace(/\s+/g, " ").trim();
+}
+
+const SHOPPING_OVERRIDE_LINK_PREFIX = "weekly-meal-shopper://ingredient-override";
+
+function getVaultBasename(filePath) {
+  const normalized = String(filePath || "").trim().split("/").pop() || "";
+  return normalized.replace(/\.[^.]+$/, "") || normalized;
+}
+
+function buildIngredientOverrideHref(ingredientName) {
+  const ingredient = cleanIngredientName(String(ingredientName || ""));
+  if (!ingredient) return SHOPPING_OVERRIDE_LINK_PREFIX;
+  return `${SHOPPING_OVERRIDE_LINK_PREFIX}?ingredient=${encodeURIComponent(ingredient)}`;
+}
+
+function parseIngredientOverrideHref(href) {
+  const raw = String(href || "").trim();
+  if (!raw.startsWith(SHOPPING_OVERRIDE_LINK_PREFIX)) return "";
+  const queryIndex = raw.indexOf("?");
+  const query = queryIndex === -1 ? "" : raw.slice(queryIndex + 1);
+  const params = new URLSearchParams(query);
+  return cleanIngredientName(decodeURIComponent(params.get("ingredient") || ""));
+}
+
+function buildShoppingRecipeUsageLine(recipes) {
+  const values = recipes && typeof recipes[Symbol.iterator] === "function"
+    ? [...recipes]
+    : [];
+  const uniquePaths = [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+  if (uniquePaths.length === 0) return "";
+  const links = uniquePaths
+    .sort((a, b) => getVaultBasename(a).localeCompare(getVaultBasename(b), undefined, { sensitivity: "base" }))
+    .map((recipePath) => {
+      const basename = getVaultBasename(recipePath);
+      if (recipePath.includes("/") || /\.[a-z0-9]+$/i.test(recipePath)) {
+        return `[[${recipePath}|${basename}]]`;
+      }
+      return `[[${basename}]]`;
+    });
+  return `    - ${links.join(", ")}`;
+}
+
+function formatShoppingListItemLines(
+  item,
+  {
+    includeRecipeUsage = false,
+    includeOverrideLinks = false,
+    noAmountCategory = false,
+  } = {}
+) {
+  if (!item || typeof item !== "object") return [];
+
+  const overrideIngredient = normalizeShoppingDisplayName(stripPreparationPhrases(item.name));
+  const overrideSuffix = includeOverrideLinks && overrideIngredient
+    ? ` [Override](${buildIngredientOverrideHref(overrideIngredient)})`
+    : "";
+
+  let mainLine = "";
+  if (noAmountCategory || item.quantityUnknown) {
+    mainLine = `  - [ ] ${item.name}${overrideSuffix}`;
+  } else if (item.unit === "unit") {
+    const roundedAmount = shouldRoundUpUnitItem(item.name) ? Math.ceil(item.amount) : item.amount;
+    const displayName = pluralizeSimple(singularizeSimple(item.name), roundedAmount);
+    mainLine = `  - [ ] (${formatMetricAmount(roundedAmount)}) ${displayName}${overrideSuffix}`;
+  } else {
+    mainLine = `  - [ ] (${formatMetricAmount(item.amount)} ${item.unit}) ${item.name}${overrideSuffix}`;
+  }
+
+  const lines = [mainLine];
+  if (includeRecipeUsage) {
+    const usageLine = buildShoppingRecipeUsageLine(item.recipes);
+    if (usageLine) lines.push(usageLine);
+  }
+  return lines;
 }
 
 function pluralizeSimple(name, amount) {
@@ -1384,7 +1766,9 @@ function convertBaseAmountToPreferredUnit(amount, baseUnit, preferredUnitRaw) {
 }
 
 function buildStandardBody(sectionMap) {
-  const ingredients = sectionMap.ingredients?.length ? sectionMap.ingredients : ["- "];
+  const ingredients = sectionMap.ingredients?.length
+    ? sectionMap.ingredients
+    : [`- ${ACTIVE_INGREDIENT_STORAGE_SEPARATOR} ${ACTIVE_INGREDIENT_STORAGE_SEPARATOR} ${ACTIVE_INGREDIENT_STORAGE_SEPARATOR}`];
   const directions = sectionMap.directions?.length ? sectionMap.directions : ["1. "];
   const notes = sectionMap.notes?.length ? sectionMap.notes : [""];
   const nutrition = sectionMap.nutrition?.length ? sectionMap.nutrition : [""];
@@ -1470,6 +1854,17 @@ function normalizeStringArray(values) {
     out.push(text);
   }
   return out;
+}
+
+function normalizeOrderedStringArray(values) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => normalizeSingleLineText(value))
+    .filter(Boolean);
+}
+
+function stripListMarkerText(line) {
+  return normalizeSingleLineText(String(line || "").replace(/^[-*+]\s+/, "").replace(/^\d+\.\s*/, ""));
 }
 
 function firstStringValue(value) {
@@ -2202,6 +2597,9 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.addSettingTab(new WeeklyMealShopperSettingTab(this.app, this));
     this.recipeViewOverlay = null;
     this.parsedIngredientCache = new Map();
+    this.registerMarkdownPostProcessor((element, context) => {
+      this.attachShoppingListOverrideLinks(element, context);
+    });
 
     this.addCommand({
       id: "open-recipe-view-in-current-tab",
@@ -2259,7 +2657,7 @@ class WeeklyMealShopperPlugin extends Plugin {
           new Notice("Open a recipe markdown file first.");
           return;
         }
-        await this.standardizeRecipeFile(file);
+        await this.standardizeRecipeFile(file, { useOpenAI: true });
       },
     });
 
@@ -2274,11 +2672,22 @@ class WeeklyMealShopperPlugin extends Plugin {
           .filter((file) => this.isRecipeFile(file));
 
         let updated = 0;
+        let skippedLegacy = 0;
         for (const recipeFile of recipeFiles) {
+          const content = await this.app.vault.read(recipeFile);
+          const parsedSections = parseSections(splitFrontmatter(content).body);
+          if (!recipeIngredientLinesAreStructured(parsedSections.ingredients)) {
+            skippedLegacy += 1;
+            continue;
+          }
           const changed = await this.standardizeRecipeFile(recipeFile);
           if (changed) updated += 1;
         }
 
+        if (skippedLegacy > 0) {
+          new Notice(`Standardized ${updated} recipe notes. Skipped ${skippedLegacy} legacy recipe notes that need 'Standardize current recipe format' first.`);
+          return;
+        }
         new Notice(`Standardized ${updated} recipe notes.`);
       },
     });
@@ -2293,12 +2702,16 @@ class WeeklyMealShopperPlugin extends Plugin {
           return;
         }
 
-        await this.standardizeRecipeFile(file);
-        const parsed = await this.parseIngredientsFromRecipeFile(file);
-        await this.saveParsedIngredientsToFrontmatter(file, parsed);
-        new Notice(
-          `Saved ${parsed.length} parsed ingredients to ${this.settings.parsedIngredientsField} and refreshed direction highlighting.`
-        );
+        try {
+          await this.standardizeRecipeFile(file);
+          const parsed = await this.parseIngredientsFromRecipeFile(file);
+          await this.saveParsedIngredientsToFrontmatter(file, parsed);
+          new Notice(
+            `Saved ${parsed.length} parsed ingredients to ${this.settings.parsedIngredientsField} and refreshed direction highlighting.`
+          );
+        } catch (error) {
+          new Notice(error?.message || String(error));
+        }
       },
     });
 
@@ -2365,7 +2778,8 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const savedSettings = await this.loadData() || {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, savedSettings);
     delete this.settings.workflowPreset;
     delete this.settings.featureBasicEnabled;
     delete this.settings.featureMealPrepEnabled;
@@ -2398,20 +2812,29 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.cupMl = Number.isFinite(Number(this.settings.cupMl)) ? Number(this.settings.cupMl) : 250;
     this.settings.tbspMl = Number.isFinite(Number(this.settings.tbspMl)) ? Number(this.settings.tbspMl) : 15;
     this.settings.tspMl = Number.isFinite(Number(this.settings.tspMl)) ? Number(this.settings.tspMl) : 5;
-    this.settings.measurementPreference = normalizeSearchText(this.settings.measurementPreference) === "volume"
-      ? "volume"
-      : "weight";
+    this.settings.measurementPreference = normalizeMeasurementPreference(this.settings.measurementPreference);
     this.settings.convertLiquidVolumeMeasuresToWeight = this.settings.convertLiquidVolumeMeasuresToWeight !== false;
-    this.settings.cupShorthand = normalizeSingleLineText(this.settings.cupShorthand || "cup") || "cup";
-    this.settings.tbspShorthand = normalizeSingleLineText(this.settings.tbspShorthand || "tbsp") || "tbsp";
-    this.settings.tspShorthand = normalizeSingleLineText(this.settings.tspShorthand || "tsp") || "tsp";
-    this.settings.ingredientLineTemplate = normalizeIngredientLineTemplate(this.settings.ingredientLineTemplate);
+    delete this.settings.cupShorthand;
+    delete this.settings.tbspShorthand;
+    delete this.settings.tspShorthand;
+    this.settings.ingredientStorageSeparator = normalizeIngredientStorageSeparator(
+      this.settings.ingredientStorageSeparator
+    );
+    this.settings.recipeViewIngredientDisplayTemplate = normalizeRecipeViewIngredientDisplayTemplate(
+      savedSettings.recipeViewIngredientDisplayTemplate || savedSettings.ingredientLineTemplate
+    );
+    delete this.settings.ingredientLineTemplate;
     this.settings.transcriptionMetricOutput = this.settings.transcriptionMetricOutput !== false;
-    this.settings.showCategoryReasonsInShoppingList = this.settings.showCategoryReasonsInShoppingList !== false;
+    if (typeof savedSettings.showRecipeUsageInShoppingList === "boolean") {
+      this.settings.showRecipeUsageInShoppingList = savedSettings.showRecipeUsageInShoppingList;
+    } else if (typeof savedSettings.showCategoryReasonsInShoppingList === "boolean") {
+      this.settings.showRecipeUsageInShoppingList = savedSettings.showCategoryReasonsInShoppingList;
+    } else {
+      this.settings.showRecipeUsageInShoppingList = DEFAULT_SETTINGS.showRecipeUsageInShoppingList !== false;
+    }
+    delete this.settings.showCategoryReasonsInShoppingList;
     this.settings.includeOverrideLinksInShoppingList = this.settings.includeOverrideLinksInShoppingList === true;
-    this.settings.settingsImportExportPath = String(
-      this.settings.settingsImportExportPath || ".obsidian/plugins/weekly-meal-shopper/settings-export.json"
-    ).trim() || ".obsidian/plugins/weekly-meal-shopper/settings-export.json";
+    delete this.settings.settingsImportExportPath;
     const sectionState = this.settings.settingsSectionState && typeof this.settings.settingsSectionState === "object"
       ? this.settings.settingsSectionState
       : {};
@@ -2421,7 +2844,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       recipeSetupCollapsed: !!sectionState.recipeSetupCollapsed,
       ingredientFormatCollapsed: !!sectionState.ingredientFormatCollapsed,
       recipeTranscriptionCollapsed: !!sectionState.recipeTranscriptionCollapsed,
-      settingsImportExportCollapsed: !!sectionState.settingsImportExportCollapsed,
       shoppingCategoriesCollapsed: !!sectionState.shoppingCategoriesCollapsed,
       excludeIngredientsCollapsed: !!sectionState.excludeIngredientsCollapsed,
       ingredientOverridesCollapsed: !!sectionState.ingredientOverridesCollapsed,
@@ -2433,19 +2855,34 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.transcriptionModel = String(this.settings.transcriptionModel || "gpt-4.1-mini").trim()
       || "gpt-4.1-mini";
     setActiveMeasurementProfile(this.settings);
-    setActiveIngredientLineTemplate(this.settings.ingredientLineTemplate);
+    setActiveIngredientStorageSeparator(this.settings.ingredientStorageSeparator);
+    setActiveRecipeViewIngredientDisplayTemplate(this.settings.recipeViewIngredientDisplayTemplate);
   }
 
   async saveSettings() {
+    const legacyIngredientDisplayTemplate = this.settings.ingredientLineTemplate;
     delete this.settings.workflowPreset;
     delete this.settings.featureBasicEnabled;
     delete this.settings.featureMealPrepEnabled;
     delete this.settings.transcriptionOutputFolder;
+    delete this.settings.showCategoryReasonsInShoppingList;
+    delete this.settings.cupShorthand;
+    delete this.settings.tbspShorthand;
+    delete this.settings.tspShorthand;
+    delete this.settings.ingredientLineTemplate;
+    delete this.settings.settingsImportExportPath;
     if (this.settings.settingsSectionState && typeof this.settings.settingsSectionState === "object") {
       delete this.settings.settingsSectionState.workflowModeCollapsed;
+      delete this.settings.settingsSectionState.settingsImportExportCollapsed;
     }
+    this.settings.showRecipeUsageInShoppingList = this.settings.showRecipeUsageInShoppingList !== false;
+    this.settings.ingredientStorageSeparator = normalizeIngredientStorageSeparator(this.settings.ingredientStorageSeparator);
+    this.settings.recipeViewIngredientDisplayTemplate = normalizeRecipeViewIngredientDisplayTemplate(
+      this.settings.recipeViewIngredientDisplayTemplate || legacyIngredientDisplayTemplate
+    );
     setActiveMeasurementProfile(this.settings);
-    setActiveIngredientLineTemplate(this.settings.ingredientLineTemplate);
+    setActiveIngredientStorageSeparator(this.settings.ingredientStorageSeparator);
+    setActiveRecipeViewIngredientDisplayTemplate(this.settings.recipeViewIngredientDisplayTemplate);
     await this.saveData(this.settings);
   }
 
@@ -2526,14 +2963,107 @@ class WeeklyMealShopperPlugin extends Plugin {
     return created;
   }
 
+  attachShoppingListOverrideLinks(containerEl, context) {
+    const sourcePath = normalizePath(context?.sourcePath || "");
+    const shoppingListPath = normalizePath(this.settings.shoppingListOutputPath || "");
+    if (!sourcePath || !shoppingListPath || sourcePath !== shoppingListPath) return;
+
+    const anchors = containerEl?.querySelectorAll?.(`a[href^="${SHOPPING_OVERRIDE_LINK_PREFIX}"]`) || [];
+    for (const anchor of anchors) {
+      if (anchor?.dataset?.weeklyMealShopperOverrideBound === "true") continue;
+      if (anchor?.dataset) anchor.dataset.weeklyMealShopperOverrideBound = "true";
+      anchor.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const ingredient = parseIngredientOverrideHref(anchor.getAttribute("href") || "");
+        if (!ingredient) {
+          new Notice("Could not determine the ingredient override target.");
+          return;
+        }
+        void this.openIngredientOverrideModal(ingredient);
+      });
+    }
+  }
+
   extractIngredientNameFromShoppingLine(line) {
     let text = String(line || "").trim();
     if (!text) return "";
+    if (/^\s*[-*+]\s+\[\[/.test(text)) return "";
     text = text.replace(/^\s*[-*+]\s+\[[ xX]\]\s*/, "").trim();
     text = text.replace(/^\(([^)]+)\)\s*/, "").trim();
     text = text.replace(/\s+_\(why:[^)]+\)_\s*$/i, "").trim();
     text = text.replace(/\s+\[(?:override|why)\]\([^)]+\)\s*$/i, "").trim();
     return text;
+  }
+
+  getIngredientOverrideSeedFromEditor(editor) {
+    if (!editor) return "";
+    const selected = String(editor.getSelection?.() || "").trim();
+    if (selected) return this.extractIngredientNameFromShoppingLine(selected);
+
+    let lineNumber = Number(editor.getCursor?.().line || 0);
+    let line = String(editor.getLine?.(lineNumber) || "");
+    if (/^\s*-\s+\[\[/.test(line.trim()) && lineNumber > 0) {
+      lineNumber -= 1;
+      line = String(editor.getLine?.(lineNumber) || "");
+    }
+    return this.extractIngredientNameFromShoppingLine(line);
+  }
+
+  async saveExcludedIngredientEntry({ ingredient, category = "" }) {
+    const value = cleanIngredientName(String(ingredient || ""));
+    if (!value) return "";
+    const map = parseExcludedIngredients(this.settings.excludedIngredientsExact);
+    map.set(normalizeSearchText(value), {
+      ingredient: value,
+      category: String(category || "").trim(),
+    });
+    this.settings.excludedIngredientsExact = [...map.values()].map(
+      (entry) => `${entry.ingredient} | ${entry.category || ""}`
+    );
+    await this.saveSettings();
+    return value;
+  }
+
+  async saveIngredientOverrideEntry({ ingredient, category, unit }) {
+    const value = cleanIngredientName(String(ingredient || ""));
+    if (!value) return "";
+    const nextMap = new Map();
+    for (const entry of parseIngredientOverrideEntries(this.settings.ingredientOverrides)) {
+      nextMap.set(entry.ingredient, entry);
+    }
+    nextMap.set(value, {
+      ingredient: value,
+      category: String(category || "").trim(),
+      unit: String(unit || "").trim(),
+    });
+    this.settings.ingredientOverrides = [...nextMap.values()].map(
+      (entry) => `${entry.ingredient} | ${entry.category} | ${entry.unit || ""}`
+    );
+    await this.saveSettings();
+    return value;
+  }
+
+  async openIngredientOverrideModal(initialIngredient = "", options = {}) {
+    const categoryConfig = await this.loadIngredientCategoryConfig();
+    const categories = getSelectableIngredientCategories(categoryConfig);
+    new IngredientEntryModal(this.app, {
+      title: "Add ingredient override",
+      ingredientLabel: "Ingredient (exact match)",
+      unitLabel: "Unit override (optional)",
+      includeUnit: true,
+      categories,
+      initialIngredient,
+      initialCategory: String(options.initialCategory || categoryConfig.defaultCategory || "").trim(),
+      submitText: "Save",
+      onSubmit: async ({ ingredient, category, unit }) => {
+        const savedIngredient = await this.saveIngredientOverrideEntry({ ingredient, category, unit });
+        if (savedIngredient) {
+          new Notice(`Override saved for ${savedIngredient}.`);
+          await options.onSubmitComplete?.(savedIngredient);
+        }
+      },
+    }).open();
   }
 
   async addIngredientOverrideFromCurrentShoppingLine() {
@@ -2543,37 +3073,12 @@ class WeeklyMealShopperPlugin extends Plugin {
       return;
     }
     const editor = view.editor;
-    const selected = String(editor.getSelection() || "").trim();
-    const line = selected || editor.getLine(editor.getCursor().line);
-    const ingredient = this.extractIngredientNameFromShoppingLine(line);
+    const ingredient = this.getIngredientOverrideSeedFromEditor(editor);
     if (!ingredient) {
       new Notice("Could not detect an ingredient name on the current line.");
       return;
     }
-
-    const categoryConfig = await this.loadIngredientCategoryConfig();
-    const categories = getSelectableIngredientCategories(categoryConfig);
-    new IngredientEntryModal(this.app, {
-      title: "Add ingredient override",
-      ingredientLabel: "Ingredient (exact match)",
-      unitLabel: "Unit override (optional)",
-      includeUnit: true,
-      categories,
-      initialIngredient: ingredient,
-      submitText: "Save",
-      onSubmit: async ({ ingredient: value, category, unit }) => {
-        const nextMap = new Map();
-        for (const entry of parseIngredientOverrideEntries(this.settings.ingredientOverrides)) {
-          nextMap.set(entry.ingredient, entry);
-        }
-        nextMap.set(value, { ingredient: value, category, unit });
-        this.settings.ingredientOverrides = [...nextMap.values()].map(
-          (v) => `${v.ingredient} | ${v.category} | ${v.unit || ""}`
-        );
-        await this.saveSettings();
-        new Notice(`Override saved for ${value}.`);
-      },
-    }).open();
+    await this.openIngredientOverrideModal(ingredient);
   }
 
   async exportSettingsToJson(pathOverride = "") {
@@ -3005,19 +3510,32 @@ class WeeklyMealShopperPlugin extends Plugin {
     );
     const lines = [];
     for (const line of cleaned) {
-      const parsed = parseIngredientLine(`- ${line}`, ACTIVE_UNIT_MAP);
-      if (!parsed) {
-        lines.push(normalizeNutIngredientTerms(line));
-        continue;
-      }
-      const normalizedParsed = {
-        ...parsed,
-        name: normalizeNutIngredientTerms(parsed.name),
-      };
-      const formatted = formatIngredientLineFromParsed(normalizedParsed, {
+      const parsed = parseIngredientLine(`- ${line}`, ACTIVE_UNIT_MAP, { allowLegacy: true });
+      const normalizedParsed = parsed
+        ? {
+          ...parsed,
+          name: normalizeNutIngredientTerms(parsed.name),
+        }
+        : (() => {
+          const split = splitIngredientNameAndPreparation(normalizeNutIngredientTerms(line));
+          const ingredientName = split.ingredientName || normalizeNutIngredientTerms(line);
+          return {
+            name: ingredientName,
+            preparation: split.preparation,
+            amount: 1,
+            unit: "",
+            unitExplicit: false,
+            quantityUnknown: true,
+            amountMetric: 0,
+            unitMetric: "unit",
+            canonicalName: canonicalIngredientName(ingredientName),
+          };
+        })();
+      const formatted = formatStructuredIngredientLineFromParsed(normalizedParsed, {
         metricMode,
         outputLabels: ACTIVE_MEASUREMENT_PROFILE.labels,
-        template: this.settings.ingredientLineTemplate,
+        measurementPreference: metricMode ? "weight" : this.settings.measurementPreference,
+        separator: this.settings.ingredientStorageSeparator,
       });
       lines.push(String(formatted).replace(/^[-*+]\s+/, "").trim());
     }
@@ -3050,6 +3568,8 @@ class WeeklyMealShopperPlugin extends Plugin {
       "Return only JSON with this shape:",
       "{\"title\":\"...\",\"ingredients\":[\"...\"],\"directions\":[\"...\"],\"notes\":[\"...\"],\"prepTime\":\"...\",\"cookTime\":\"...\",\"portions\":\"...\",\"cover\":\"...\",\"link\":\"...\"}",
       "Keep ingredient and direction text concise and clean.",
+      "Ingredient strings should stay close to 'amount unit ingredient, preparation' when a preparation detail is clear.",
+      "Keep explicit countable units like can, clove, clove(s), piece, and egg when they are present.",
       "Directions should explicitly reference ingredient names so each listed ingredient can be matched in steps.",
       "Prefer specific ingredient terms over generic ones (example: use 'pecan nuts' rather than only 'nuts').",
       "If details are missing, infer minimally and avoid fabricating specifics.",
@@ -3090,10 +3610,84 @@ class WeeklyMealShopperPlugin extends Plugin {
     return this.normalizeTranscribedRecipeData(parsed, sourceLabel);
   }
 
+  async alignRecipeSectionsWithOpenAI({ title = "", ingredients = [], directions = [], notes = [] } = {}) {
+    const apiKey = await this.resolveTranscriptionApiKey();
+    if (!apiKey) {
+      throw new Error("Set an OpenAI API key in plugin settings (or OPENAI_API_KEY env var).");
+    }
+
+    const model = String(this.settings.transcriptionModel || "gpt-4.1-mini").trim() || "gpt-4.1-mini";
+    const instruction = [
+      "Normalize an existing recipe's ingredients and directions into cleaner structured text.",
+      "Return only JSON with this shape:",
+      "{\"ingredients\":[\"...\"],\"directions\":[\"...\"]}",
+      "Preserve the recipe's meaning, ingredient list, and overall quantities.",
+      "Do not invent ingredients, steps, or measurements.",
+      "Rewrite ingredient lines so the ingredient name is explicit and preparation is expressed clearly.",
+      "Use explicit count units like can, clove, piece, egg, or orange when appropriate.",
+      "If a source ingredient combines multiple actions, rewrite it into parser-friendly text. Example: 'zest and juice of 1 orange' becomes '1 orange, zested and juiced'.",
+      "Rewrite directions so they explicitly mention the ingredient names used in the ingredient list, which helps the recipe-view step highlighting match them reliably.",
+      "Keep directions concise and preserve the original step order.",
+    ].join(" ");
+
+    const payload = [
+      { type: "input_text", text: instruction },
+      { type: "input_text", text: `Recipe title: ${normalizeSingleLineText(title) || "Untitled Recipe"}` },
+      { type: "input_text", text: `Ingredients:\n${normalizeOrderedStringArray(ingredients).map(stripListMarkerText).join("\n")}` },
+      { type: "input_text", text: `Directions:\n${normalizeOrderedStringArray(directions).map(stripListMarkerText).join("\n")}` },
+    ];
+    if (Array.isArray(notes) && notes.length > 0) {
+      payload.push({
+        type: "input_text",
+        text: `Notes:\n${normalizeOrderedStringArray(notes).join("\n")}`,
+      });
+    }
+
+    const response = await this.requestOpenAIResponsesWithRetry({
+      apiKey,
+      model,
+      input: [{ role: "user", content: payload }],
+    });
+
+    const data = response.json || {};
+    const outputText = String(
+      data.output_text
+      || data?.output?.[0]?.content?.[0]?.text
+      || data?.output?.[0]?.content?.[0]?.value
+      || ""
+    );
+    const jsonText = this.extractFirstJsonObject(outputText);
+    if (!jsonText) {
+      throw new Error("Model response did not include valid JSON recipe output.");
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      throw new Error("Could not parse JSON from model response.");
+    }
+
+    const ingredientLines = normalizeOrderedStringArray(Array.isArray(parsed?.ingredients) ? parsed.ingredients : [])
+      .map(stripListMarkerText)
+      .filter(Boolean);
+    const directionLines = normalizeOrderedStringArray(Array.isArray(parsed?.directions) ? parsed.directions : [])
+      .map(stripListMarkerText)
+      .filter(Boolean);
+    if (ingredientLines.length === 0 || directionLines.length === 0) {
+      throw new Error("Model response did not return both ingredients and directions.");
+    }
+
+    return {
+      ingredients: ingredientLines,
+      directions: directionLines,
+    };
+  }
+
   buildTranscribedRecipeNoteContent(recipe) {
     const ingredientsLines = recipe.ingredients.length > 0
       ? recipe.ingredients.map((line) => `- ${String(line).replace(/^[-*+]\s+/, "").trim()}`)
-      : ["- "];
+      : [`- ${ACTIVE_INGREDIENT_STORAGE_SEPARATOR} ${ACTIVE_INGREDIENT_STORAGE_SEPARATOR} ${ACTIVE_INGREDIENT_STORAGE_SEPARATOR}`];
     const directionLines = recipe.directions.length > 0
       ? recipe.directions.map((line, idx) => `${idx + 1}. ${String(line).replace(/^\d+\.\s*/, "")}`)
       : ["1. "];
@@ -3350,6 +3944,14 @@ class WeeklyMealShopperPlugin extends Plugin {
       return;
     }
 
+    let parsedIngredients = [];
+    try {
+      parsedIngredients = await this.parseIngredientsFromRecipeFile(file);
+    } catch (error) {
+      new Notice(error?.message || String(error));
+      return;
+    }
+
     this.closeRecipeViewOverlay({ restoreLivePreview: false });
 
     const viewContainer = leaf.view?.containerEl?.querySelector(".view-content");
@@ -3398,7 +4000,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     viewContainer.appendChild(overlay);
     this.recipeViewOverlay = overlay;
     await MarkdownRenderer.render(this.app, markdown, content, file.path, this);
-    this.applyRecipeSplitView(content, { sourcePath: file.path });
+    this.applyRecipeSplitView(content, { sourcePath: file.path, parsedIngredients });
     overlay.focus();
 
     const rightPane = overlay.querySelector(".weekly-meal-shopper-recipe-main-pane");
@@ -3460,10 +4062,33 @@ class WeeklyMealShopperPlugin extends Plugin {
     el.appendChild(splitRoot);
     el.setAttribute("data-weekly-meal-shopper-split", "true");
 
+    this.renderRecipeViewIngredientPane(leftPane, ctx?.parsedIngredients || []);
     this.enableIngredientChecklist(file, leftPane);
     this.enableRecipeSectionSync(leftPane, rightPane);
     this.enableRecipeVimNavigation(rightPane);
     this.enableStepIngredientEmphasis(leftPane, rightPane);
+  }
+
+  renderRecipeViewIngredientPane(leftPane, parsedIngredients) {
+    if (!leftPane) return;
+    const ingredientItems = [...leftPane.querySelectorAll("li")];
+    if (ingredientItems.length === 0) return;
+
+    const items = Array.isArray(parsedIngredients) ? parsedIngredients : [];
+    let parsedIndex = 0;
+    for (const li of ingredientItems) {
+      const parsed = items[parsedIndex];
+      if (!parsed) continue;
+      parsedIndex += 1;
+      const displayText = formatRecipeViewIngredientDisplay(parsed, {
+        template: this.settings.recipeViewIngredientDisplayTemplate,
+        outputLabels: ACTIVE_MEASUREMENT_PROFILE.labels,
+      });
+      li.textContent = displayText;
+      li.dataset.wmsIngredientName = normalizeSingleLineText(parsed.name);
+      li.dataset.wmsIngredientPreparation = normalizeSingleLineText(parsed.preparation || "");
+      li.dataset.wmsIngredientDisplay = displayText;
+    }
   }
 
   enableRecipeVimNavigation(rightPane) {
@@ -3641,13 +4266,18 @@ class WeeklyMealShopperPlugin extends Plugin {
     if (!leftPane || !rightPane) return;
     const ingredientItems = [...leftPane.querySelectorAll("li")];
     if (ingredientItems.length === 0) return;
-    const ingredientLines = ingredientItems.map((li) => `- ${String(li.textContent || "").trim()}`);
+    const ingredientLines = ingredientItems.map((li) => {
+      const name = normalizeSingleLineText(li.dataset?.wmsIngredientName || "");
+      const preparation = normalizeSingleLineText(li.dataset?.wmsIngredientPreparation || "");
+      if (!name) return `- ${String(li.textContent || "").trim()}`;
+      return `- ${name}${preparation ? `, ${preparation}` : ""}`;
+    });
     const sharedGenericWords = collectSharedGenericIngredientWords(ingredientLines);
 
     const entries = ingredientItems.map((li) => {
-      const parsed = parseIngredientLine(`- ${String(li.textContent || "").trim()}`);
-      const baseName = parsed?.name
-        ? stripPreparationPhrases(parsed.name)
+      const datasetName = normalizeSingleLineText(li.dataset?.wmsIngredientName || "");
+      const baseName = datasetName
+        ? stripPreparationPhrases(datasetName)
         : stripPreparationPhrases(String(li.textContent || ""));
       const mentionPhrases = buildIngredientMentionPhrases([`- ${baseName}`], { sharedGenericWords });
       return { li, mentionPhrases };
@@ -3840,27 +4470,41 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.parsedIngredientCache.delete(filePath);
   }
 
-  async parseIngredientsFromRecipeFile(file, { force = false } = {}) {
+  getLegacyRecipeIngredientNotice(file) {
+    const fileLabel = file?.basename ? `"${file.basename}"` : "this recipe";
+    return `${fileLabel} still uses the old free-text ingredient format. Run 'Weekly Meal Shopper: Standardize current recipe format' first.`;
+  }
+
+  async parseIngredientsFromRecipeFile(file, { force = false, allowLegacy = false } = {}) {
     if (!this.parsedIngredientCache) this.parsedIngredientCache = new Map();
     const signature = this.getRecipeParseSignature(file);
     const cached = this.parsedIngredientCache.get(file.path);
-    if (!force && cached && cached.signature === signature) {
+    if (!force && !allowLegacy && cached && cached.signature === signature) {
       return this.cloneParsedIngredients(cached.items);
     }
 
     const content = await this.app.vault.read(file);
     const lines = extractIngredientsSection(content);
+    if (!allowLegacy && !recipeIngredientLinesAreStructured(lines)) {
+      throw new Error(this.getLegacyRecipeIngredientNotice(file));
+    }
     const parsed = [];
     for (const line of lines) {
-      const item = parseIngredientLine(line);
+      if (!isMeaningfulIngredientLine(line)) continue;
+      const item = parseIngredientLine(line, ACTIVE_UNIT_MAP, { allowLegacy });
+      if (!item && !allowLegacy) {
+        throw new Error(this.getLegacyRecipeIngredientNotice(file));
+      }
       if (!item) continue;
       parsed.push(applyMeasurementPreferenceToParsedItem(item));
     }
 
-    this.parsedIngredientCache.set(file.path, {
-      signature,
-      items: this.cloneParsedIngredients(parsed),
-    });
+    if (!allowLegacy) {
+      this.parsedIngredientCache.set(file.path, {
+        signature,
+        items: this.cloneParsedIngredients(parsed),
+      });
+    }
     return parsed;
   }
 
@@ -3881,7 +4525,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.invalidateRecipeParseCache(file.path);
   }
 
-  async standardizeRecipeFile(file) {
+  async standardizeRecipeFile(file, { useOpenAI = false } = {}) {
     const original = await this.app.vault.read(file);
 
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
@@ -3914,7 +4558,42 @@ class WeeklyMealShopperPlugin extends Plugin {
     const updated = await this.app.vault.read(file);
     const split = splitFrontmatter(updated);
     const sectionMap = parseSections(split.body);
-    sectionMap.ingredients = normalizeIngredientsSectionLines(sectionMap.ingredients);
+    const canSafelyRewriteIngredients = useOpenAI || recipeIngredientLinesAreStructured(sectionMap.ingredients);
+    if (!canSafelyRewriteIngredients) {
+      if (updated !== original) {
+        this.invalidateRecipeParseCache(file.path);
+        return true;
+      }
+      return false;
+    }
+    let usedOpenAI = false;
+
+    if (useOpenAI) {
+      try {
+        const aligned = await this.alignRecipeSectionsWithOpenAI({
+          title: file.basename,
+          ingredients: sectionMap.ingredients,
+          directions: sectionMap.directions,
+          notes: sectionMap.notes,
+        });
+        if (aligned?.ingredients?.length) {
+          sectionMap.ingredients = aligned.ingredients.map((line) => `- ${stripListMarkerText(line)}`);
+        }
+        if (aligned?.directions?.length) {
+          sectionMap.directions = aligned.directions.map((line, index) => `${index + 1}. ${stripListMarkerText(line)}`);
+        }
+        usedOpenAI = true;
+      } catch (error) {
+        new Notice(`API-assisted recipe cleanup skipped: ${error?.message || String(error)}. Using local standardization instead.`);
+      }
+    }
+    sectionMap.ingredients = normalizeIngredientsSectionLines(
+      sectionMap.ingredients,
+      ACTIVE_UNIT_MAP,
+      ACTIVE_MEASUREMENT_PROFILE.labels,
+      this.settings.ingredientStorageSeparator,
+      this.settings.measurementPreference
+    );
     sectionMap.directions = normalizeDirectionsSectionLines(sectionMap.directions, sectionMap.ingredients);
     const standardizedBody = buildStandardBody(sectionMap);
 
@@ -3926,6 +4605,10 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     const parsedIngredients = await this.parseIngredientsFromRecipeFile(file, { force: true });
     await this.saveParsedIngredientsToFrontmatter(file, parsedIngredients);
+
+    if (usedOpenAI) {
+      new Notice(`Standardized ${file.basename} with API-assisted ingredient and direction alignment.`);
+    }
 
     return true;
   }
@@ -4000,30 +4683,28 @@ class WeeklyMealShopperPlugin extends Plugin {
     if (visited.has(file.path)) return [];
     visited.add(file.path);
 
-    let parsed = this.extractParsedIngredientsFromFrontmatter(file);
-    const hasSuspiciousParsedNames = parsed.some((item) => looksLikePreparationOnlyName(item.name));
-    if (parsed.length === 0 || hasSuspiciousParsedNames) {
-      const extracted = await this.parseIngredientsFromRecipeFile(file);
-      if (extracted.length > 0) {
-        await this.saveParsedIngredientsToFrontmatter(file, extracted);
-      }
-
-      parsed = extracted.map((item, idx) => ({
-        name: item.name,
-        canonicalName: item.canonicalName,
-        unitMetric: item.unitMetric,
-        amountMetric: item.amountMetric,
-        quantityUnknown: !!item.quantityUnknown,
-        sourceRecipePath: file.path,
-        sourceIndex: idx,
-      }));
-    } else {
-      parsed = parsed.map((item, idx) => ({
-        ...item,
-        sourceRecipePath: item.sourceRecipePath || file.path,
-        sourceIndex: Number.isFinite(item.sourceIndex) ? item.sourceIndex : idx,
-      }));
+    const extracted = await this.parseIngredientsFromRecipeFile(file);
+    const currentParsedFrontmatter = this.extractParsedIngredientsFromFrontmatter(file);
+    const hasSuspiciousParsedNames = currentParsedFrontmatter.some((item) => looksLikePreparationOnlyName(item.name));
+    if (
+      extracted.length > 0
+      && (
+        currentParsedFrontmatter.length !== extracted.length
+        || hasSuspiciousParsedNames
+      )
+    ) {
+      await this.saveParsedIngredientsToFrontmatter(file, extracted);
     }
+
+    let parsed = extracted.map((item, idx) => ({
+      name: item.name,
+      canonicalName: item.canonicalName,
+      unitMetric: item.unitMetric,
+      amountMetric: item.amountMetric,
+      quantityUnknown: !!item.quantityUnknown,
+      sourceRecipePath: file.path,
+      sourceIndex: idx,
+    }));
 
     const linkedRecipes = this.getLinkedRecipeFilesFromIngredientRecipes(file);
     for (const linkedFile of linkedRecipes) {
@@ -4296,7 +4977,13 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     for (const { file, defaultCount, projectCount, hostingCount } of recipes.values()) {
       const profile = this.getRecipePlanningProfile(file, defaultCount);
-      const ingredients = await this.getRecipeIngredients(file);
+      let ingredients = [];
+      try {
+        ingredients = await this.getRecipeIngredients(file);
+      } catch (error) {
+        new Notice(error?.message || String(error));
+        return;
+      }
       const recipePortions = this.getRecipePortions(file);
 
       const projectPortionsTotal = projectCount > 0 ? (projectServingsTargets.get(file.path) || 0) : 0;
@@ -4354,7 +5041,7 @@ class WeeklyMealShopperPlugin extends Plugin {
         };
         existing.amount += item.amountMetric * totalBatches;
         existing.quantityUnknown = existing.quantityUnknown || !!item.quantityUnknown;
-        existing.recipes.add(file.basename);
+        existing.recipes.add(file.path);
         if (!existing.categoryReason && classified.reason) existing.categoryReason = classified.reason;
         if (categoryLocked) {
           existing.category = category;
@@ -4418,7 +5105,13 @@ class WeeklyMealShopperPlugin extends Plugin {
         category: item.category || "Fresh Fruit and Vegetables",
         wholeFromJuice: 0,
         wholeExplicit: 0,
+        recipes: new Set(),
       };
+
+      const recipeEntries = item.recipes && typeof item.recipes[Symbol.iterator] === "function"
+        ? item.recipes
+        : [];
+      for (const recipe of recipeEntries) citrus.recipes.add(recipe);
 
       if (/\bjuice\b/.test(normalizedDisplayName)) {
         citrus.wholeFromJuice += estimateCitrusUnitsFromJuice(item, citrusKey);
@@ -4454,7 +5147,7 @@ class WeeklyMealShopperPlugin extends Plugin {
         name: roundedWhole === 1 ? singular : plural,
         unit: "unit",
         amount: roundedWhole,
-        recipes: new Set(),
+        recipes: citrus.recipes,
         category: citrus.category || "Fresh Fruit and Vegetables",
         categoryReason: "citrus rollup",
       });
@@ -4476,7 +5169,6 @@ class WeeklyMealShopperPlugin extends Plugin {
     }
 
     const groupedIngredientLines = [];
-    const overrideUri = this.getCommandUri("add-ingredient-override-from-current-shopping-line");
     for (const category of orderedCategories) {
       const items = grouped.get(category) || [];
       if (items.length === 0) continue;
@@ -4484,31 +5176,11 @@ class WeeklyMealShopperPlugin extends Plugin {
       const noAmountCategory =
         category === "Spices and Seasoning" || category === "Herbs, Spices and Seasonings";
       for (const item of items) {
-        const whySuffix = this.settings.showCategoryReasonsInShoppingList
-          ? ` _(why: ${item.categoryReason || "default category"})_`
-          : "";
-        const overrideSuffix = this.settings.includeOverrideLinksInShoppingList
-          ? ` [Override](${overrideUri})`
-          : "";
-        if (noAmountCategory) {
-          groupedIngredientLines.push(`  - [ ] ${item.name}${whySuffix}${overrideSuffix}`);
-          continue;
-        }
-        if (item.quantityUnknown) {
-          groupedIngredientLines.push(`  - [ ] ${item.name}${whySuffix}${overrideSuffix}`);
-          continue;
-        }
-        if (item.unit === "unit") {
-          const roundedAmount = shouldRoundUpUnitItem(item.name) ? Math.ceil(item.amount) : item.amount;
-          const displayName = pluralizeSimple(singularizeSimple(item.name), roundedAmount);
-          groupedIngredientLines.push(
-            `  - [ ] (${formatMetricAmount(roundedAmount)}) ${displayName}${whySuffix}${overrideSuffix}`
-          );
-        } else {
-          groupedIngredientLines.push(
-            `  - [ ] (${formatMetricAmount(item.amount)} ${item.unit}) ${item.name}${whySuffix}${overrideSuffix}`
-          );
-        }
+        groupedIngredientLines.push(...formatShoppingListItemLines(item, {
+          includeRecipeUsage: this.settings.showRecipeUsageInShoppingList !== false,
+          includeOverrideLinks: this.settings.includeOverrideLinksInShoppingList === true,
+          noAmountCategory,
+        }));
       }
     }
 
@@ -4637,20 +5309,20 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     });
 
     new Setting(mealPrepBody)
-      .setName("Show category reason in shopping list")
-      .setDesc("Adds '(why: ...)' annotations next to each generated shopping item.")
+      .setName("Show recipe usage in shopping list")
+      .setDesc("Adds an indented recipe-link line under each generated shopping item.")
       .addToggle((toggle) =>
         toggle
-          .setValue(this.plugin.settings.showCategoryReasonsInShoppingList !== false)
+          .setValue(this.plugin.settings.showRecipeUsageInShoppingList !== false)
           .onChange(async (value) => {
-            this.plugin.settings.showCategoryReasonsInShoppingList = value;
+            this.plugin.settings.showRecipeUsageInShoppingList = value;
             await this.plugin.saveSettings();
           })
       );
 
     new Setting(mealPrepBody)
       .setName("Add one-click override links")
-      .setDesc("Adds an Override link on each shopping item to quickly save an ingredient override.")
+      .setDesc("Adds an Override link on each shopping item so preview and reading view can save ingredient overrides directly.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.includeOverrideLinksInShoppingList !== false)
@@ -4710,9 +5382,10 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
         dropdown
           .addOption("weight", "Weight-first (g where appropriate)")
           .addOption("volume", "Volume-first")
+          .addOption("both", "Both (original plus converted weight)")
           .setValue(this.plugin.settings.measurementPreference || "weight")
           .onChange(async (value) => {
-            this.plugin.settings.measurementPreference = value === "volume" ? "volume" : "weight";
+            this.plugin.settings.measurementPreference = normalizeMeasurementPreference(value);
             await this.plugin.saveSettings();
           })
       );
@@ -4740,50 +5413,52 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(ingredientFormatBody)
-      .setName("Cup volume (mL)")
-      .setDesc("Used when parsing and normalizing ingredients.")
-      .addText((text) =>
-        text
-          .setPlaceholder("250")
-          .setValue(String(this.plugin.settings.cupMl ?? 250))
-          .onChange(async (value) => {
-            const n = Number(value);
-            this.plugin.settings.cupMl = Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : this.plugin.settings.cupMl;
-            this.plugin.settings.measurementPreset = "custom";
-            await this.plugin.saveSettings();
-          })
-      );
+    if (this.plugin.settings.measurementPreset === "custom") {
+      new Setting(ingredientFormatBody)
+        .setName("Cup volume (mL)")
+        .setDesc("Used when parsing and normalizing ingredients.")
+        .addText((text) =>
+          text
+            .setPlaceholder("250")
+            .setValue(String(this.plugin.settings.cupMl ?? 250))
+            .onChange(async (value) => {
+              const n = Number(value);
+              this.plugin.settings.cupMl = Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : this.plugin.settings.cupMl;
+              this.plugin.settings.measurementPreset = "custom";
+              await this.plugin.saveSettings();
+            })
+        );
 
-    new Setting(ingredientFormatBody)
-      .setName("Tablespoon volume (mL)")
-      .setDesc("Used when parsing and normalizing ingredients.")
-      .addText((text) =>
-        text
-          .setPlaceholder("15")
-          .setValue(String(this.plugin.settings.tbspMl ?? 15))
-          .onChange(async (value) => {
-            const n = Number(value);
-            this.plugin.settings.tbspMl = Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : this.plugin.settings.tbspMl;
-            this.plugin.settings.measurementPreset = "custom";
-            await this.plugin.saveSettings();
-          })
-      );
+      new Setting(ingredientFormatBody)
+        .setName("Tablespoon volume (mL)")
+        .setDesc("Used when parsing and normalizing ingredients.")
+        .addText((text) =>
+          text
+            .setPlaceholder("15")
+            .setValue(String(this.plugin.settings.tbspMl ?? 15))
+            .onChange(async (value) => {
+              const n = Number(value);
+              this.plugin.settings.tbspMl = Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : this.plugin.settings.tbspMl;
+              this.plugin.settings.measurementPreset = "custom";
+              await this.plugin.saveSettings();
+            })
+        );
 
-    new Setting(ingredientFormatBody)
-      .setName("Teaspoon volume (mL)")
-      .setDesc("Used when parsing and normalizing ingredients.")
-      .addText((text) =>
-        text
-          .setPlaceholder("5")
-          .setValue(String(this.plugin.settings.tspMl ?? 5))
-          .onChange(async (value) => {
-            const n = Number(value);
-            this.plugin.settings.tspMl = Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : this.plugin.settings.tspMl;
-            this.plugin.settings.measurementPreset = "custom";
-            await this.plugin.saveSettings();
-          })
-      );
+      new Setting(ingredientFormatBody)
+        .setName("Teaspoon volume (mL)")
+        .setDesc("Used when parsing and normalizing ingredients.")
+        .addText((text) =>
+          text
+            .setPlaceholder("5")
+            .setValue(String(this.plugin.settings.tspMl ?? 5))
+            .onChange(async (value) => {
+              const n = Number(value);
+              this.plugin.settings.tspMl = Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : this.plugin.settings.tspMl;
+              this.plugin.settings.measurementPreset = "custom";
+              await this.plugin.saveSettings();
+            })
+        );
+    }
 
     new Setting(ingredientFormatBody)
       .setName("Convert liquid cup/tbsp/tsp to grams")
@@ -4798,60 +5473,34 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       );
 
     new Setting(ingredientFormatBody)
-      .setName("Cup shorthand")
-      .setDesc("Display shorthand used when standardizing ingredient lines.")
+      .setName("Ingredient storage separator")
+      .setDesc("Stored recipe ingredients use fixed slots: Amount, Unit, Ingredient, Preparation.")
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("cup", "cup")
-          .addOption("cups", "cups")
-          .addOption("c", "c")
-          .setValue(this.plugin.settings.cupShorthand || "cup")
+          .addOption(";", ";")
+          .addOption(",", ",")
+          .addOption(":", ":")
+          .addOption("|", "|")
+          .setValue(this.plugin.settings.ingredientStorageSeparator || ";")
           .onChange(async (value) => {
-            this.plugin.settings.cupShorthand = value;
+            this.plugin.settings.ingredientStorageSeparator = normalizeIngredientStorageSeparator(value);
             await this.plugin.saveSettings();
           })
       );
 
     new Setting(ingredientFormatBody)
-      .setName("Tablespoon shorthand")
-      .setDesc("Display shorthand used when standardizing ingredient lines.")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("tbsp", "tbsp")
-          .addOption("tablespoon", "tablespoon")
-          .addOption("tablespoons", "tablespoons")
-          .addOption("tbs", "tbs")
-          .setValue(this.plugin.settings.tbspShorthand || "tbsp")
-          .onChange(async (value) => {
-            this.plugin.settings.tbspShorthand = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(ingredientFormatBody)
-      .setName("Teaspoon shorthand")
-      .setDesc("Display shorthand used when standardizing ingredient lines.")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("tsp", "tsp")
-          .addOption("teaspoon", "teaspoon")
-          .addOption("teaspoons", "teaspoons")
-          .setValue(this.plugin.settings.tspShorthand || "tsp")
-          .onChange(async (value) => {
-            this.plugin.settings.tspShorthand = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(ingredientFormatBody)
-      .setName("Ingredient line template")
+      .setName("Recipe view ingredient display template")
       .setDesc("Placeholders: {{Amount}} {{Unit}} {{Ingredient}} {{Preparation}} {{PreparationSuffix}}")
       .addText((text) =>
         text
-          .setPlaceholder("{{Amount}} {{Unit}} {{Ingredient}}")
-          .setValue(this.plugin.settings.ingredientLineTemplate || "{{Amount}} {{Unit}} {{Ingredient}}")
+          .setPlaceholder("{{Amount}} {{Unit}} {{Ingredient}}{{PreparationSuffix}}")
+          .setValue(
+            this.plugin.settings.recipeViewIngredientDisplayTemplate
+            || "{{Amount}} {{Unit}} {{Ingredient}}{{PreparationSuffix}}"
+          )
           .onChange(async (value) => {
-            this.plugin.settings.ingredientLineTemplate = normalizeIngredientLineTemplate(value);
+            this.plugin.settings.recipeViewIngredientDisplayTemplate =
+              normalizeRecipeViewIngredientDisplayTemplate(value);
             await this.plugin.saveSettings();
           })
       );
@@ -4955,58 +5604,13 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       );
 
     this.renderCategoryHeading(containerEl, {
-      title: "Maintenance",
-      description: "Backup and restore plugin settings when you want to move or reset your setup.",
-    });
-
-    const { body: importExportBody } = this.buildFoldableSection(containerEl, {
-      stateKey: "settingsImportExportCollapsed",
-      title: "Settings import/export",
-      description: "Backup and restore the full plugin settings JSON.",
-    });
-
-    new Setting(importExportBody)
-      .setName("Settings JSON path")
-      .setDesc("Export/import full plugin settings as JSON for backups and presets.")
-      .addText((text) =>
-        text
-          .setPlaceholder(".obsidian/plugins/weekly-meal-shopper/settings-export.json")
-          .setValue(this.plugin.settings.settingsImportExportPath || ".obsidian/plugins/weekly-meal-shopper/settings-export.json")
-          .onChange(async (value) => {
-            this.plugin.settings.settingsImportExportPath = value.trim() || ".obsidian/plugins/weekly-meal-shopper/settings-export.json";
-            await this.plugin.saveSettings();
-          })
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Export").onClick(async () => {
-          try {
-            const path = await this.plugin.exportSettingsToJson(this.plugin.settings.settingsImportExportPath);
-            new Notice(`Settings exported: ${path}`);
-          } catch (error) {
-            new Notice(`Export failed: ${error?.message || String(error)}`);
-          }
-        })
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Import").setWarning().onClick(async () => {
-          try {
-            const path = await this.plugin.importSettingsFromJson(this.plugin.settings.settingsImportExportPath);
-            new Notice(`Settings imported: ${path}`);
-            await this.display();
-          } catch (error) {
-            new Notice(`Import failed: ${error?.message || String(error)}`);
-          }
-        })
-      );
-
-    this.renderCategoryHeading(containerEl, {
       title: "Ingredient Rules",
       description: "Classification categories, exclusions, and overrides are grouped here.",
     });
 
     this.renderShoppingCategoriesSection(containerEl, categoryConfig);
     this.renderExcludedIngredientsSection(containerEl, categories);
-    this.renderIngredientOverridesSection(containerEl, categories);
+    this.renderIngredientOverridesSection(containerEl, categories, categoryConfig.defaultCategory);
 
     this.renderCategoryHeading(containerEl, {
       title: "First-Time Setup",
@@ -5283,13 +5887,17 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     addBtn.setAttribute("aria-label", "Add excluded ingredient");
 
     const listEl = body.createDiv({ cls: "weekly-meal-shopper-entry-list" });
+    const getEntries = () => [...parseExcludedIngredients(this.plugin.settings.excludedIngredientsExact).values()]
+      .filter((entry) => normalizeSearchText(entry.ingredient).includes(searchQuery));
 
     const renderList = () => {
       listEl.empty();
-      const entries = [...parseExcludedIngredients(this.plugin.settings.excludedIngredientsExact).values()]
-        .filter((entry) => normalizeSearchText(entry.ingredient).includes(searchQuery));
+      const entries = getEntries();
       if (entries.length === 0) {
-        listEl.createEl("div", { text: "No excluded ingredients match the current search.", cls: "weekly-meal-shopper-empty" });
+        const message = searchQuery
+          ? `No excluded ingredients match the current search. Press Enter to add "${searchInput.value.trim()}".`
+          : "No excluded ingredients match the current search.";
+        listEl.createEl("div", { text: message, cls: "weekly-meal-shopper-empty" });
         return;
       }
 
@@ -5317,6 +5925,19 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       renderList();
     });
 
+    searchInput.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") return;
+      const ingredient = cleanIngredientName(String(searchInput.value || ""));
+      if (!ingredient) return;
+      const exactEntries = parseExcludedIngredients(this.plugin.settings.excludedIngredientsExact);
+      if (exactEntries.has(normalizeSearchText(ingredient))) return;
+      event.preventDefault();
+      await this.plugin.saveExcludedIngredientEntry({ ingredient });
+      searchInput.value = "";
+      searchQuery = "";
+      renderList();
+    });
+
     addBtn.addEventListener("click", () => {
       new IngredientEntryModal(this.app, {
         title: "Add excluded ingredient",
@@ -5325,12 +5946,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
         requireCategory: false,
         submitText: "Add",
         onSubmit: async ({ ingredient, category }) => {
-          const map = parseExcludedIngredients(this.plugin.settings.excludedIngredientsExact);
-          map.set(normalizeSearchText(ingredient), { ingredient, category });
-          this.plugin.settings.excludedIngredientsExact = [...map.values()].map(
-            (v) => `${v.ingredient} | ${v.category}`
-          );
-          await this.plugin.saveSettings();
+          await this.plugin.saveExcludedIngredientEntry({ ingredient, category });
           renderList();
         },
       }).open();
@@ -5339,7 +5955,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     renderList();
   }
 
-  renderIngredientOverridesSection(containerEl, categories) {
+  renderIngredientOverridesSection(containerEl, categories, defaultCategoryName = "") {
     const { body, searchInput } = this.buildFoldableSection(containerEl, {
       stateKey: "ingredientOverridesCollapsed",
       title: "Ingredient Categories",
@@ -5355,13 +5971,18 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     addBtn.setAttribute("aria-label", "Add ingredient override");
 
     const listEl = body.createDiv({ cls: "weekly-meal-shopper-entry-list" });
+    const defaultCategory = String(defaultCategoryName || categories[0] || "").trim();
+    const getEntries = () => parseIngredientOverrideEntries(this.plugin.settings.ingredientOverrides)
+      .filter((entry) => normalizeSearchText(entry.ingredient).includes(searchQuery));
 
     const renderList = () => {
       listEl.empty();
-      const entries = parseIngredientOverrideEntries(this.plugin.settings.ingredientOverrides)
-        .filter((entry) => normalizeSearchText(entry.ingredient).includes(searchQuery));
+      const entries = getEntries();
       if (entries.length === 0) {
-        listEl.createEl("div", { text: "No ingredient overrides match the current search.", cls: "weekly-meal-shopper-empty" });
+        const message = searchQuery
+          ? `No ingredient overrides match the current search. Press Enter to add "${searchInput.value.trim()}".`
+          : "No ingredient overrides match the current search.";
+        listEl.createEl("div", { text: message, cls: "weekly-meal-shopper-empty" });
         return;
       }
 
@@ -5389,6 +6010,24 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       renderList();
     });
 
+    searchInput.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") return;
+      const ingredient = cleanIngredientName(String(searchInput.value || ""));
+      if (!ingredient) return;
+      const existing = parseIngredientOverrideEntries(this.plugin.settings.ingredientOverrides)
+        .some((entry) => normalizeSearchText(entry.ingredient) === normalizeSearchText(ingredient));
+      if (existing) return;
+      event.preventDefault();
+      await this.plugin.openIngredientOverrideModal(ingredient, {
+        initialCategory: defaultCategory,
+        onSubmitComplete: async () => {
+          searchInput.value = "";
+          searchQuery = "";
+          renderList();
+        },
+      });
+    });
+
     addBtn.addEventListener("click", () => {
       new IngredientEntryModal(this.app, {
         title: "Add ingredient override",
@@ -5396,6 +6035,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
         unitLabel: "Unit override (optional)",
         includeUnit: true,
         categories,
+        initialCategory: defaultCategory,
         submitText: "Add",
         onSubmit: async ({ ingredient, category, unit }) => {
           const nextMap = new Map();

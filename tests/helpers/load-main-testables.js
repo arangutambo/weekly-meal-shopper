@@ -7,6 +7,7 @@ class FakeHTMLElement {
     this.tagName = String(tagName || "div").toUpperCase();
     this.textContent = String(textContent || "");
     this.children = [];
+    this.dataset = {};
   }
 
   appendChild(child) {
@@ -20,10 +21,18 @@ class FakeHTMLElement {
     }
     return [];
   }
+
+  addEventListener() {}
+
+  getAttribute() {
+    return "";
+  }
 }
 
 function createObsidianStub() {
-  class Plugin {}
+  class Plugin {
+    registerMarkdownPostProcessor() {}
+  }
   class Modal {}
   class PluginSettingTab {}
   class Setting {}
@@ -70,6 +79,7 @@ function loadMainContext() {
     RegExp,
     Error,
     Promise,
+    URLSearchParams,
     HTMLElement: FakeHTMLElement,
     require: (id) => {
       if (id === "obsidian") return createObsidianStub();

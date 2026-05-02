@@ -29,6 +29,17 @@ test("loadSettings preserves an existing date-based canvas name template during 
   assert.equal(plugin.settings.mealPrepCanvasNameTemplate, "⛑️ Weekly Meal Plan {{date}}.canvas");
 });
 
+test("loadSettings preserves the both measurement preference", async () => {
+  const plugin = new PluginClass();
+  plugin.loadData = async () => ({
+    measurementPreference: "both",
+  });
+
+  await plugin.loadSettings();
+
+  assert.equal(plugin.settings.measurementPreference, "both");
+});
+
 test("loadSettings seeds fresh installs with default excluded pantry ingredients", async () => {
   const plugin = new PluginClass();
   plugin.loadData = async () => ({});
@@ -54,6 +65,18 @@ test("loadSettings folds legacy transcription output folder into recipeFolder", 
   assert.equal("transcriptionOutputFolder" in plugin.settings, false);
 });
 
+test("loadSettings migrates the legacy shopping-list toggle into recipe usage display", async () => {
+  const plugin = new PluginClass();
+  plugin.loadData = async () => ({
+    showCategoryReasonsInShoppingList: false,
+  });
+
+  await plugin.loadSettings();
+
+  assert.equal(plugin.settings.showRecipeUsageInShoppingList, false);
+  assert.equal("showCategoryReasonsInShoppingList" in plugin.settings, false);
+});
+
 test("saveSettings strips legacy mode flags from persisted settings", async () => {
   const plugin = new PluginClass();
   let saved = null;
@@ -63,19 +86,22 @@ test("saveSettings strips legacy mode flags from persisted settings", async () =
     featureBasicEnabled: true,
     featureMealPrepEnabled: true,
     transcriptionOutputFolder: "pages/Imported Recipes",
+    showCategoryReasonsInShoppingList: false,
+    settingsImportExportPath: ".obsidian/plugins/weekly-meal-shopper/settings-export.json",
     settingsSectionState: {
       workflowModeCollapsed: true,
+      settingsImportExportCollapsed: true,
       firstTimeSetupCollapsed: false,
     },
+    showRecipeUsageInShoppingList: true,
     ingredientLineTemplate: "{{Amount}} {{Unit}} {{Ingredient}}",
     measurementPreset: "vault_standard",
     measurementPreference: "weight",
     cupMl: 250,
     tbspMl: 15,
     tspMl: 5,
-    cupShorthand: "cup",
-    tbspShorthand: "tbsp",
-    tspShorthand: "tsp",
+    tbspShorthand: "tablespoon",
+    tspShorthand: "teaspoon",
   };
   plugin.saveData = async (value) => {
     saved = JSON.parse(JSON.stringify(value));
@@ -87,7 +113,20 @@ test("saveSettings strips legacy mode flags from persisted settings", async () =
   assert.equal("featureBasicEnabled" in saved, false);
   assert.equal("featureMealPrepEnabled" in saved, false);
   assert.equal("transcriptionOutputFolder" in saved, false);
+  assert.equal("showCategoryReasonsInShoppingList" in saved, false);
+  assert.equal("cupShorthand" in saved, false);
+  assert.equal("tbspShorthand" in saved, false);
+  assert.equal("tspShorthand" in saved, false);
+  assert.equal("ingredientLineTemplate" in saved, false);
+  assert.equal("settingsImportExportPath" in saved, false);
   assert.equal("workflowModeCollapsed" in saved.settingsSectionState, false);
+  assert.equal("settingsImportExportCollapsed" in saved.settingsSectionState, false);
+  assert.equal(saved.showRecipeUsageInShoppingList, true);
+  assert.equal(saved.ingredientStorageSeparator, ";");
+  assert.equal(
+    saved.recipeViewIngredientDisplayTemplate,
+    "{{Amount}} {{Unit}} {{Ingredient}}"
+  );
 });
 
 test("createWeeklyMealPrepCanvas copies the plugin canvas template into the target folder", async () => {

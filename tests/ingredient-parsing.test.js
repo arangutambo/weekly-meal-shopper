@@ -78,16 +78,85 @@ test("direction normalization matches flour from plain flour ingredient", () => 
 
 test("transcribed ingredient normalization expands pecans to pecan nuts", () => {
   const plugin = new PluginClass();
-  plugin.settings = { ingredientLineTemplate: "{{Amount}} {{Unit}} {{Ingredient}}" };
+  plugin.settings = { ingredientStorageSeparator: ";" };
   const [line] = plugin.normalizeTranscribedIngredientLines(["70 g chopped pecans"], { metricMode: false });
-  assert.equal(line, "70 g chopped pecan nuts");
+  assert.equal(line, "70; g; chopped pecan nuts;");
 });
 
 test("transcribed ingredient normalization keeps explicit countable units like can in metric mode", () => {
   const plugin = new PluginClass();
-  plugin.settings = { ingredientLineTemplate: "{{Amount}} {{Unit}} {{Ingredient}}" };
+  plugin.settings = { ingredientStorageSeparator: ";" };
   const [line] = plugin.normalizeTranscribedIngredientLines(["1 can chickpeas"], { metricMode: true });
-  assert.equal(line, "1 can chickpeas");
+  assert.equal(line, "1; can; chickpeas;");
+});
+
+test("ingredient parser splits trailing preparation phrases even without commas", () => {
+  const parsed = ctx.parseIngredientLine("- 250 g sweet potato roughly chopped");
+
+  assert.ok(parsed);
+  assert.equal(parsed.name, "sweet potato");
+  assert.equal(parsed.preparation, "roughly chopped");
+});
+
+test("transcribed ingredient normalization adds commas before trailing preparation phrases", () => {
+  const plugin = new PluginClass();
+  plugin.settings = { ingredientStorageSeparator: ";" };
+  const [line] = plugin.normalizeTranscribedIngredientLines(["1 can chickpeas drained and rinsed"], { metricMode: true });
+  assert.equal(line, "1; can; chickpeas; drained and rinsed");
+});
+
+test("transcribed ingredient normalization converts dense metric volumes to grams", () => {
+  const plugin = new PluginClass();
+  plugin.settings = { ingredientStorageSeparator: ";" };
+  const [line] = plugin.normalizeTranscribedIngredientLines(["1 cup olive oil"], { metricMode: true });
+  assert.equal(line, "228; g; olive oil;");
+});
+
+test("transcribed ingredient normalization keeps metric volume when no density rule exists", () => {
+  const plugin = new PluginClass();
+  plugin.settings = { ingredientStorageSeparator: ";" };
+  const [line] = plugin.normalizeTranscribedIngredientLines(["1 cup breadcrumbs"], { metricMode: true });
+  assert.equal(line, "250; ml; breadcrumbs;");
+});
+
+test("structured ingredient parser accepts all supported separators and blank slots", () => {
+  const semicolon = ctx.parseIngredientLine("- 1; ; Sweet Potato; Roughly Chopped", undefined, { allowLegacy: false });
+  const comma = ctx.parseIngredientLine("- 2, cups, flour,", undefined, { allowLegacy: false });
+  const colon = ctx.parseIngredientLine("- : : salt flakes and freshly ground black pepper :", undefined, { allowLegacy: false });
+  const pipe = ctx.parseIngredientLine("- 1/2 | cup | kale | finely chopped", undefined, { allowLegacy: false });
+
+  assert.equal(semicolon.amount, 1);
+  assert.equal(semicolon.unitExplicit, false);
+  assert.equal(semicolon.name, "Sweet Potato");
+  assert.equal(semicolon.preparation, "Roughly Chopped");
+
+  assert.equal(comma.amount, 2);
+  assert.equal(comma.unit, "cups");
+  assert.equal(comma.name, "flour");
+  assert.equal(comma.preparation, "");
+
+  assert.equal(colon.quantityUnknown, true);
+  assert.equal(colon.unitExplicit, false);
+  assert.equal(colon.name, "salt flakes and freshly ground black pepper");
+
+  assert.equal(pipe.amount, 0.5);
+  assert.equal(pipe.unit, "cup");
+  assert.equal(pipe.name, "kale");
+  assert.equal(pipe.preparation, "finely chopped");
+});
+
+test("structured-only parsing rejects legacy ingredient lines", () => {
+  const parsed = ctx.parseIngredientLine("- 1 cup flour", undefined, { allowLegacy: false });
+  assert.equal(parsed, null);
+});
+
+test("recipe view display formatter hides empty structured fields cleanly", () => {
+  const parsed = ctx.parseIngredientLine("- 1; ; Sweet Potato; Roughly Chopped", undefined, { allowLegacy: false });
+  const display = ctx.formatRecipeViewIngredientDisplay(parsed, {
+    template: "{{Amount}} {{Unit}} {{Ingredient}}{{PreparationSuffix}}",
+  });
+
+  assert.equal(display, "1 Sweet Potato, Roughly Chopped");
 });
 
 test("transcribed direction normalization aligns generic nuts to ingredient names", () => {

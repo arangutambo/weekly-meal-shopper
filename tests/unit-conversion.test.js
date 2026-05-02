@@ -11,9 +11,6 @@ function buildProfile(settings) {
     cupMl: settings.cupMl,
     tbspMl: settings.tbspMl,
     tspMl: settings.tspMl,
-    cupShorthand: "cup",
-    tbspShorthand: "tbsp",
-    tspShorthand: "tsp",
   });
 }
 
@@ -33,4 +30,52 @@ test("AU and US preset volume conversions parse as expected", () => {
 test("temperature conversion adds metric + fan-forced values for oven lines", () => {
   const converted = ctx.convertDirectionTemperaturesToMetric("Preheat oven to 350F and bake for 20 minutes.");
   assert.match(converted, /177\u00b0C \(fan 157\u00b0C\)/);
+});
+
+test("both measurement preference keeps the original volume and appends converted weight", () => {
+  const parsed = ctx.parseIngredientLine("- 1 cup olive oil");
+  const line = ctx.formatIngredientLineFromParsed(parsed, {
+    metricMode: false,
+    measurementPreference: "both",
+  });
+
+  assert.equal(line, "- 1 cup (228 g) olive oil");
+});
+
+test("both measurement preference falls back to original output when no density conversion exists", () => {
+  const parsed = ctx.parseIngredientLine("- 1 cup breadcrumbs");
+  const line = ctx.formatIngredientLineFromParsed(parsed, {
+    metricMode: false,
+    measurementPreference: "both",
+  });
+
+  assert.equal(line, "- 1 cup breadcrumbs");
+});
+
+test("cup output uses singular and plural labels automatically", () => {
+  const single = ctx.formatIngredientLineFromParsed(ctx.parseIngredientLine("- 1 cup flour"), {
+    metricMode: false,
+    measurementPreference: "volume",
+  });
+  const plural = ctx.formatIngredientLineFromParsed(ctx.parseIngredientLine("- 2 cup flour"), {
+    metricMode: false,
+    measurementPreference: "volume",
+  });
+
+  assert.equal(single, "- 1 cup flour");
+  assert.equal(plural, "- 2 cups flour");
+});
+
+test("tbsp and tsp output are fixed shorthands during normalization", () => {
+  const tbspLine = ctx.formatIngredientLineFromParsed(ctx.parseIngredientLine("- 1 tablespoon flour"), {
+    metricMode: false,
+    measurementPreference: "volume",
+  });
+  const tspLine = ctx.formatIngredientLineFromParsed(ctx.parseIngredientLine("- 2 teaspoons baking powder"), {
+    metricMode: false,
+    measurementPreference: "volume",
+  });
+
+  assert.equal(tbspLine, "- 1 tbsp flour");
+  assert.equal(tspLine, "- 2 tsp baking powder");
 });
