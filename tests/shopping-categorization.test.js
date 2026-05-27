@@ -34,6 +34,34 @@ test("regressions: pantry/protein/spices staples are classified correctly", () =
   }
 });
 
+test("previously-missing spices land in Spices and Seasoning via DEFAULT config", () => {
+  const spices = ["saffron", "cardamom", "star anise", "nutmeg", "sumac", "harissa", "dukkah", "szechuan pepper", "fennel seeds", "five spice"];
+  for (const name of spices) {
+    const classified = ctx.classifyIngredientCategoryWithReason(name);
+    assert.equal(classified.category, "Spices and Seasoning", `expected ${name} → Spices and Seasoning, got ${classified.category}`);
+  }
+});
+
+test("chili is Fresh Fruit and Vegetables; chili flake is Spices and Seasoning", () => {
+  const fresh = ctx.classifyIngredientCategoryWithReason("red chili");
+  assert.equal(fresh.category, "Fresh Fruit and Vegetables");
+
+  const dried = ctx.classifyIngredientCategoryWithReason("chili flakes");
+  assert.equal(dried.category, "Spices and Seasoning");
+});
+
+test("pizza does not match za atar spice rule", () => {
+  const classified = ctx.classifyIngredientCategoryWithReason("pizza base");
+  assert.notEqual(classified.category, "Spices and Seasoning");
+});
+
+test("shopping display name normalizes scallion, green onion, and bell pepper synonyms", () => {
+  assert.equal(ctx.normalizeShoppingDisplayName("scallions"), "spring onion");
+  assert.equal(ctx.normalizeShoppingDisplayName("green onions"), "spring onion");
+  assert.equal(ctx.normalizeShoppingDisplayName("bell pepper"), "capsicum");
+  assert.equal(ctx.normalizeShoppingDisplayName("red bell peppers"), "red capsicum");
+});
+
 test("moveArrayItem reorders category rows for drag-and-drop saving", () => {
   assert.deepEqual(
     Array.from(ctx.moveArrayItem(["A", "B", "C", "D"], 1, 3)),

@@ -136,13 +136,11 @@ test("createWeeklyMealPrepCanvas copies the plugin canvas template into the targ
   const templateContent = "{\n  \"nodes\": [\n    {\"id\": \"group-1\", \"type\": \"group\"}\n  ],\n  \"edges\": []\n}\n";
 
   plugin.settings = {
-    mealPrepCanvasFolder: "Utility",
-    mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas",
+    weeklyCanvasPath: "Utility/⛑️ Weekly Meal Plan.canvas",
     mealPrepCanvasTemplateVaultPath: "Templates/Weekly Meal Shopper/Meal Prep Canvas Template.canvas",
   };
   plugin.ensureFolderPathExists = async () => {};
   plugin.saveSettings = async () => {};
-  plugin.buildMealPrepCanvasFilename = () => "⛑️ Weekly Meal Plan Week 45 2026.canvas";
   plugin.app = {
     vault: {
       getAbstractFileByPath: () => null,
@@ -168,10 +166,9 @@ test("createWeeklyMealPrepCanvas copies the plugin canvas template into the targ
 
   const created = await plugin.createWeeklyMealPrepCanvas();
 
-  assert.equal(created.path, "Utility/⛑️ Weekly Meal Plan Week 45 2026.canvas");
+  assert.equal(created.path, "Utility/⛑️ Weekly Meal Plan.canvas");
   assert.equal(created.content, templateContent);
-  assert.equal(plugin.settings.weeklyCanvasPath, "Utility/⛑️ Weekly Meal Plan Week 45 2026.canvas");
-  assert.deepEqual(opened, ["Utility/⛑️ Weekly Meal Plan Week 45 2026.canvas"]);
+  assert.deepEqual(opened, ["Utility/⛑️ Weekly Meal Plan.canvas"]);
   assert.equal(createdFiles.length, 1);
 });
 

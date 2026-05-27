@@ -43,13 +43,14 @@ test("both measurement preference keeps the original volume and appends converte
 });
 
 test("both measurement preference falls back to original output when no density conversion exists", () => {
-  const parsed = ctx.parseIngredientLine("- 1 cup breadcrumbs");
+  // dried lavender has no density entry so display should stay as-is (volume)
+  const parsed = ctx.parseIngredientLine("- 1 cup dried lavender");
   const line = ctx.formatIngredientLineFromParsed(parsed, {
     metricMode: false,
     measurementPreference: "both",
   });
 
-  assert.equal(line, "- 1 cup breadcrumbs");
+  assert.equal(line, "- 1 cup dried lavender");
 });
 
 test("cup output uses singular and plural labels automatically", () => {

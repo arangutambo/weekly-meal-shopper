@@ -115,8 +115,34 @@ test("transcribed ingredient normalization converts dense metric volumes to gram
 test("transcribed ingredient normalization keeps metric volume when no density rule exists", () => {
   const plugin = new PluginClass();
   plugin.settings = { ingredientStorageSeparator: ";" };
-  const [line] = plugin.normalizeTranscribedIngredientLines(["1 cup breadcrumbs"], { metricMode: true });
-  assert.equal(line, "250; ml; breadcrumbs;");
+  // dried lavender has no density entry so should remain as ml
+  const [line] = plugin.normalizeTranscribedIngredientLines(["1 cup dried lavender"], { metricMode: true });
+  assert.equal(line, "250; ml; dried lavender;");
+});
+
+test("transcribed ingredient normalization rewrites juice-of citrus lines into parser-friendly form", () => {
+  const plugin = new PluginClass();
+  plugin.settings = { ingredientStorageSeparator: ";" };
+  const [line] = plugin.normalizeTranscribedIngredientLines(["Juice of 1/2 lime"], { metricMode: false });
+  assert.equal(line, "0.5; ; lime; juiced");
+});
+
+test("transcribed ingredient normalization keeps package counts and package size details together", () => {
+  const plugin = new PluginClass();
+  plugin.settings = { ingredientStorageSeparator: ";" };
+  const [line] = plugin.normalizeTranscribedIngredientLines(["29 oz can whole tomatoes"], { metricMode: true });
+  assert.equal(line, "1; can; whole tomatoes; 29 oz");
+});
+
+test("transcribed ingredient normalization drops ingredient subheadings", () => {
+  const plugin = new PluginClass();
+  plugin.settings = { ingredientStorageSeparator: ";" };
+  const lines = plugin.normalizeTranscribedIngredientLines([
+    "Dan dan sauce ingredients:",
+    "2 stalks celery, finely diced",
+  ], { metricMode: false });
+
+  assert.equal(JSON.stringify(lines), JSON.stringify(["2; stalks; celery; finely diced"]));
 });
 
 test("structured ingredient parser accepts all supported separators and blank slots", () => {
@@ -143,6 +169,26 @@ test("structured ingredient parser accepts all supported separators and blank sl
   assert.equal(pipe.unit, "cup");
   assert.equal(pipe.name, "kale");
   assert.equal(pipe.preparation, "finely chopped");
+});
+
+test("structured ingredient parser repairs legacy-like ingredient payloads inside structured slots", () => {
+  const citrus = ctx.parseIngredientLine("- ; ; Juice of 1/2 lime;", undefined, { allowLegacy: false });
+  const packaged = ctx.parseIngredientLine("- 29; ; oz can whole tomatoes;", undefined, { allowLegacy: false });
+  const sizedPiece = ctx.parseIngredientLine("- 2.5; ; cm piece of ginger; peeled and finely chopped", undefined, { allowLegacy: false });
+
+  assert.equal(citrus.name, "lime");
+  assert.equal(citrus.preparation, "juiced");
+  assert.equal(citrus.amount, 0.5);
+
+  assert.equal(packaged.amount, 1);
+  assert.equal(packaged.unit, "can");
+  assert.equal(packaged.name, "whole tomatoes");
+  assert.equal(packaged.preparation, "29 oz");
+
+  assert.equal(sizedPiece.amount, 1);
+  assert.equal(sizedPiece.unit, "piece");
+  assert.equal(sizedPiece.name, "ginger");
+  assert.equal(sizedPiece.preparation, "peeled and finely chopped, 2.5 cm");
 });
 
 test("structured-only parsing rejects legacy ingredient lines", () => {

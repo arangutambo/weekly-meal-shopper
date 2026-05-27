@@ -14,6 +14,7 @@ const {
 
 const DEFAULT_SETTINGS = {
   weeklyCanvasPath: "Utility/⛑️ Weekly Meal Plan.canvas",
+  weeklyCanvasPath2: "",
   mealPrepCanvasFolder: "Utility",
   mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas",
   shoppingListOutputPath: "Utility/🛒 Weekly Shopping List.md",
@@ -95,6 +96,13 @@ const BASE_UNIT_MAP = {
   mg: { baseUnit: "g", factor: 0.001 },
   milligram: { baseUnit: "g", factor: 0.001 },
   milligrams: { baseUnit: "g", factor: 0.001 },
+  oz: { baseUnit: "g", factor: 28.35 },
+  ounce: { baseUnit: "g", factor: 28.35 },
+  ounces: { baseUnit: "g", factor: 28.35 },
+  lb: { baseUnit: "g", factor: 453.59 },
+  lbs: { baseUnit: "g", factor: 453.59 },
+  pound: { baseUnit: "g", factor: 453.59 },
+  pounds: { baseUnit: "g", factor: 453.59 },
 
   ml: { baseUnit: "ml", factor: 1 },
   milliliter: { baseUnit: "ml", factor: 1 },
@@ -118,6 +126,34 @@ const BASE_UNIT_MAP = {
   cans: { baseUnit: "unit", factor: 1 },
   handful: { baseUnit: "unit", factor: 1 },
   handfuls: { baseUnit: "unit", factor: 1 },
+  pinch: { baseUnit: "unit", factor: 1 },
+  pinches: { baseUnit: "unit", factor: 1 },
+  stalk: { baseUnit: "unit", factor: 1 },
+  stalks: { baseUnit: "unit", factor: 1 },
+  rib: { baseUnit: "unit", factor: 1 },
+  ribs: { baseUnit: "unit", factor: 1 },
+  head: { baseUnit: "unit", factor: 1 },
+  heads: { baseUnit: "unit", factor: 1 },
+  bulb: { baseUnit: "unit", factor: 1 },
+  bulbs: { baseUnit: "unit", factor: 1 },
+  bunch: { baseUnit: "unit", factor: 1 },
+  bunches: { baseUnit: "unit", factor: 1 },
+  sprig: { baseUnit: "unit", factor: 1 },
+  sprigs: { baseUnit: "unit", factor: 1 },
+  jar: { baseUnit: "unit", factor: 1 },
+  jars: { baseUnit: "unit", factor: 1 },
+  tin: { baseUnit: "unit", factor: 1 },
+  tins: { baseUnit: "unit", factor: 1 },
+  packet: { baseUnit: "unit", factor: 1 },
+  packets: { baseUnit: "unit", factor: 1 },
+  package: { baseUnit: "unit", factor: 1 },
+  packages: { baseUnit: "unit", factor: 1 },
+  bottle: { baseUnit: "unit", factor: 1 },
+  bottles: { baseUnit: "unit", factor: 1 },
+  slice: { baseUnit: "unit", factor: 1 },
+  slices: { baseUnit: "unit", factor: 1 },
+  sheet: { baseUnit: "unit", factor: 1 },
+  sheets: { baseUnit: "unit", factor: 1 },
 };
 
 const MEASUREMENT_PRESETS = {
@@ -157,6 +193,115 @@ const WEIGHT_DENSITY_G_PER_ML = {
   syrup: 1.33,
   molasses: 1.4,
   salt: 1.2,
+
+  // Nut butters and pastes (weigh well; measured by volume in recipes but bought by weight)
+  "peanut butter": 0.96,
+  "almond butter": 0.96,
+  "cashew butter": 0.96,
+  "sunflower seed butter": 0.95,
+  "pumpkin seed butter": 0.95,
+  "sesame paste": 0.95,
+  "miso": 1.07,
+  "miso paste": 1.07,
+  "tomato paste": 1.08,
+  "gochujang": 1.18,
+  "doubanjiang": 1.12,
+  // Note: liquid condiments (soy sauce, vinegar, fish sauce, etc.) are intentionally
+  // NOT listed here so they fall through to tbsp/tsp display in humanizeVolumeUnit.
+
+  // Dry goods that are often measured by volume but better shown by weight
+  "tahini": 0.95,
+  "rolled oats": 0.36,
+  "oats": 0.36,
+  "instant oats": 0.36,
+  "quick oats": 0.36,
+  "almond meal": 0.48,
+  "almond flour": 0.48,
+  "ground almonds": 0.48,
+  "breadcrumbs": 0.35,
+  "panko breadcrumbs": 0.22,
+  "panko": 0.22,
+  "nutritional yeast": 0.30,
+  "desiccated coconut": 0.28,
+  "shredded coconut": 0.28,
+  "coconut flakes": 0.28,
+  "sesame seeds": 0.57,
+  "sunflower seeds": 0.57,
+  "pumpkin seeds": 0.53,
+  "chia seeds": 0.69,
+  "flaxseeds": 0.69,
+  "flax seeds": 0.69,
+  "poppy seeds": 0.65,
+  "cornstarch": 0.67,
+  "corn starch": 0.67,
+  "cornflour": 0.67,
+  "arrowroot": 0.67,
+  "baking powder": 0.90,
+  "baking soda": 0.89,
+  "bicarbonate of soda": 0.89,
+  "cocoa powder": 0.33,
+  "cacao powder": 0.33,
+  "cocoa": 0.33,
+  "icing sugar": 0.56,
+  "powdered sugar": 0.56,
+  "confectioners sugar": 0.56,
+  "rice flour": 0.56,
+  "buckwheat flour": 0.53,
+  "chickpea flour": 0.49,
+  "besan": 0.49,
+  "spelt flour": 0.53,
+  "whole wheat flour": 0.55,
+  "wholemeal flour": 0.55,
+  "tapioca starch": 0.67,
+  "potato starch": 0.67,
+
+  // Cooked / canned legumes and grains
+  "cooked chickpeas": 0.72,
+  "canned chickpeas": 0.72,
+  "cooked lentils": 0.74,
+  "red lentils": 0.74,
+  "cooked rice": 0.81,
+  "cooked quinoa": 0.77,
+  "frozen peas": 0.60,
+  "green peas": 0.60,
+  "frozen green peas": 0.60,
+  "frozen corn": 0.65,
+  "frozen edamame": 0.65,
+  "white beans": 0.72,
+  "cannellini beans": 0.72,
+  "borlotti beans": 0.72,
+  "black beans": 0.72,
+  "kidney beans": 0.72,
+  "black-eyed peas": 0.72,
+  "cooked beans": 0.72,
+  "lentils": 0.74,
+
+  // Fresh vegetables measured by volume
+  "mushrooms": 0.33,
+  "sliced mushrooms": 0.26,
+  "diced mushrooms": 0.26,
+  "bean sprouts": 0.085,
+
+  // Nuts (measured by volume → weight)
+  "walnuts": 0.52,
+  "pecans": 0.46,
+  "almonds": 0.59,
+  "cashews": 0.65,
+  "pine nuts": 0.67,
+  "hazelnuts": 0.55,
+  "pistachios": 0.55,
+  "macadamia nuts": 0.55,
+  "peanuts": 0.64,
+  "roasted peanuts": 0.64,
+  "chopped walnuts": 0.52,
+  "chopped almonds": 0.59,
+  "chopped pecans": 0.46,
+  "soy crisps": 0.25,
+
+  // Other
+  "coarse salt": 1.22,
+  "sea salt": 1.22,
+  "kosher salt": 0.72,
 };
 
 const DEFAULT_UNIT_DENSITY_CONFIG = {
@@ -449,6 +594,49 @@ const INGREDIENT_CONNECTOR_WORDS = new Set([
   "or",
 ]);
 
+// Fresh herbs that should be displayed as "N bunch" in the shopping list
+// regardless of how they were measured in the recipe.
+const HERB_BUNCH_INGREDIENTS = new Set([
+  "parsley",
+  "flat leaf parsley",
+  "flat-leaf parsley",
+  "curly parsley",
+  "coriander",
+  "cilantro",
+  "coriander leaves",
+  "basil",
+  "fresh basil",
+  "mint",
+  "fresh mint",
+  "dill",
+  "chives",
+  "tarragon",
+  "sage",
+  "rosemary",
+  "thyme",
+  "fresh thyme",
+  "oregano",
+  "fresh oregano",
+  "lemongrass",
+  "spring onions",
+  "green onions",
+  "scallions",
+  "baby arugula",
+  "arugula",
+  "rocket",
+  "baby spinach",
+  "spinach",
+  "watercress",
+  "kale",
+  "silverbeet",
+  "chard",
+  "swiss chard",
+]);
+
+// How many ml of a herb corresponds to one "bunch" for shopping purposes.
+// 1 bunch of most fresh herbs yields roughly 1 cup (250ml) usable leaves.
+const HERB_BUNCH_ML = 250;
+
 const SHOPPING_CATEGORY_ORDER = [
   "Cheese",
   "Fresh Fruit and Vegetables",
@@ -490,6 +678,7 @@ const DEFAULT_INGREDIENT_CATEGORY_CONFIG = {
     turmeric: "Spices and Seasoning",
     tumeric: "Spices and Seasoning",
     "chilli flake": "Spices and Seasoning",
+    "chili flake": "Spices and Seasoning",
     cinnamon: "Spices and Seasoning",
     "bay leaf": "Spices and Seasoning",
     "bay leaves": "Spices and Seasoning",
@@ -502,6 +691,27 @@ const DEFAULT_INGREDIENT_CATEGORY_CONFIG = {
     "dried herb": "Spices and Seasoning",
     "dried herbs": "Spices and Seasoning",
     "dried flakes": "Spices and Seasoning",
+    saffron: "Spices and Seasoning",
+    "star anise": "Spices and Seasoning",
+    "anise": "Spices and Seasoning",
+    cardamom: "Spices and Seasoning",
+    "five spice": "Spices and Seasoning",
+    "five-spice": "Spices and Seasoning",
+    "ground coriander": "Spices and Seasoning",
+    "coriander powder": "Spices and Seasoning",
+    allspice: "Spices and Seasoning",
+    cloves: "Spices and Seasoning",
+    nutmeg: "Spices and Seasoning",
+    "fennel seed": "Spices and Seasoning",
+    "fennel seeds": "Spices and Seasoning",
+    "szechuan": "Spices and Seasoning",
+    "sichuan": "Spices and Seasoning",
+    sumac: "Spices and Seasoning",
+    "za atar": "Spices and Seasoning",
+    harissa: "Spices and Seasoning",
+    "ras el hanout": "Spices and Seasoning",
+    dukkah: "Spices and Seasoning",
+    "chinese five": "Spices and Seasoning",
 
     avocado: "Fresh Fruit and Vegetables",
     apple: "Fresh Fruit and Vegetables",
@@ -533,6 +743,7 @@ const DEFAULT_INGREDIENT_CATEGORY_CONFIG = {
     parsley: "Fresh Fruit and Vegetables",
     coriander: "Fresh Fruit and Vegetables",
     chilli: "Fresh Fruit and Vegetables",
+    chili: "Fresh Fruit and Vegetables",
     lemongrass: "Fresh Fruit and Vegetables",
     squash: "Fresh Fruit and Vegetables",
 
@@ -772,6 +983,50 @@ function splitIngredientNameAndPreparation(text) {
   };
 }
 
+function looksLikeIngredientSubheadingLine(text) {
+  const source = normalizeSingleLineText(text);
+  if (!source) return false;
+  if (parseAmountFromStart(source)) return false;
+
+  const trimmed = source.replace(/[:\-–—]+$/g, "").trim();
+  const normalized = normalizeSearchText(trimmed);
+  if (!normalized) return false;
+
+  if (/\bingredients?\b/.test(normalized)) return true;
+  if (/^for the\b/.test(normalized)) return true;
+  if (/[::\-–—]\s*$/.test(source) && normalized.split(" ").length <= 6) return true;
+  return false;
+}
+
+function normalizeLegacyIngredientText(text) {
+  let source = normalizeSingleLineText(text).replace(/[–—]/g, "-");
+  if (!source) return "";
+
+  source = source.replace(/^zest\s+and\s+juice\s+of\s+(.+)$/i, (_match, target) => `${target}, zested and juiced`);
+  source = source.replace(/^juice\s+of\s+(.+)$/i, (_match, target) => `${target}, juiced`);
+  source = source.replace(/^zest\s+of\s+(.+)$/i, (_match, target) => `${target}, zested`);
+  source = source.replace(/^handful\s+of\s+(.+)$/i, (_match, target) => `1 handful ${target}`);
+  source = source.replace(/^pinch\s+of\s+(.+)$/i, (_match, target) => `1 pinch ${target}`);
+  source = source.replace(
+    /^(\d+(?:\.\d+)?)\s*cm\s+piece(?:s)?\s+of\s+(.+)$/i,
+    (_match, size, target) => `1 piece ${target}, ${size} cm`
+  );
+  source = source.replace(
+    /^(\d+(?:\.\d+)?)\s*(?:in|inch|inches)\s+piece(?:s)?\s+of\s+(.+)$/i,
+    (_match, size, target) => `1 piece ${target}, ${size} inch`
+  );
+  source = source.replace(
+    /^(\d+(?:\.\d+)?(?:\s+\d+\/\d+)?)\s+(\d+(?:\.\d+)?)\s*(oz|ounce|ounces|g|gram|grams|kg|kilogram|kilograms|ml|milliliters?|millilitres?|l|liters?|litres?)\s+(can|cans|jar|jars|tin|tins|packet|packets|package|packages|bottle|bottles)\s+(.+)$/i,
+    (_match, count, size, sizeUnit, container, target) => `${count} ${container} ${target}, ${size} ${sizeUnit} each`
+  );
+  source = source.replace(
+    /^(\d+(?:\.\d+)?)\s*(oz|ounce|ounces|g|gram|grams|kg|kilogram|kilograms|ml|milliliters?|millilitres?|l|liters?|litres?)\s+(can|cans|jar|jars|tin|tins|packet|packets|package|packages|bottle|bottles)\s+(.+)$/i,
+    (_match, size, sizeUnit, container, target) => `1 ${singularizeSimple(container)} ${target}, ${size} ${sizeUnit}`
+  );
+
+  return source.replace(/\s{2,}/g, " ").trim();
+}
+
 function splitStructuredIngredientSlots(text, preferredSeparator = ACTIVE_INGREDIENT_STORAGE_SEPARATOR) {
   const source = String(text || "").replace(/^[-*+]\s+/, "").trim();
   if (!source) return null;
@@ -869,13 +1124,20 @@ function formatRecipeViewIngredientDisplay(
   const templateToUse = normalizeRecipeViewIngredientDisplayTemplate(template);
   const fields = buildIngredientRenderFields(parsed, {
     metricMode: false,
-    measurementPreference: "volume",
-    preferWeight: false,
+    measurementPreference: ACTIVE_MEASUREMENT_PREFERENCE,
+    preferWeight: shouldPreferWeightMeasurements(ACTIVE_MEASUREMENT_PREFERENCE),
     outputLabels,
   });
+  let displayAmount = fields.amount;
+  let displayUnit = fields.unit;
+  if (displayUnit === "ml" && parsed?.amountMetric > 0) {
+    const humanized = humanizeVolumeUnit(parsed.amountMetric, "ml", parsed.name || "");
+    displayAmount = String(humanized.amount);
+    displayUnit = humanized.unit;
+  }
   const replacements = {
-    amount: fields.amount,
-    unit: fields.unit,
+    amount: displayAmount,
+    unit: displayUnit,
     ingredient: fields.ingredient,
     preparation: fields.preparation,
     preparationsuffix: fields.preparationSuffix,
@@ -977,6 +1239,37 @@ function parseIngredientLine(line, unitMap = ACTIVE_UNIT_MAP, options = {}) {
       }
     }
 
+    if (looksLikeIngredientSubheadingLine(ingredientSlot) && !amountSlot && !cleanedUnitSlot) {
+      return null;
+    }
+
+    if (!cleanedUnitSlot) {
+      const repairCandidate = amountSlot
+        ? `${amountSlot} ${ingredientSlot}${preparation ? `, ${preparation}` : ""}`
+        : `${ingredientSlot}${preparation ? `, ${preparation}` : ""}`;
+      const repaired = parseIngredientLine(`- ${repairCandidate}`, unitMap, {
+        allowLegacy: true,
+        preferredSeparator: null,
+      });
+      if (
+        repaired
+        && !repaired.isStructured
+        && (
+          repaired.unitExplicit
+          || repaired.quantityUnknown !== quantityUnknown
+          || repaired.name !== ingredientName
+          || repaired.preparation !== preparation
+        )
+      ) {
+        return {
+          ...repaired,
+          source: line,
+          isStructured: true,
+          separator: structured.separator,
+        };
+      }
+    }
+
     return {
       name: ingredientName,
       preparation,
@@ -995,6 +1288,8 @@ function parseIngredientLine(line, unitMap = ACTIVE_UNIT_MAP, options = {}) {
 
   if (!allowLegacy) return null;
 
+  text = normalizeLegacyIngredientText(text);
+  if (!text || looksLikeIngredientSubheadingLine(text)) return null;
   text = text.replace(/\([^)]*oz[^)]*\)/gi, "").trim();
   // Support compact quantity+unit formats like "150g", "1kg", "250ml".
   text = text.replace(/^(\d+(?:\.\d+)?)([a-zA-Z]+)/, "$1 $2");
@@ -1289,6 +1584,9 @@ function normalizeShoppingDisplayName(name) {
   if (!cleaned) return cleaned;
   cleaned = cleaned.replace(/\bfresh\s+cilantro\b/gi, "fresh coriander");
   cleaned = cleaned.replace(/\bcilantro\b/gi, "coriander");
+  cleaned = cleaned.replace(/\bgreen\s+onions?\b/gi, "spring onion");
+  cleaned = cleaned.replace(/\bscallions?\b/gi, "spring onion");
+  cleaned = cleaned.replace(/\bbell\s+peppers?\b/gi, "capsicum");
   return cleaned.replace(/\s+/g, " ").trim();
 }
 
@@ -1765,6 +2063,50 @@ function convertBaseAmountToPreferredUnit(amount, baseUnit, preferredUnitRaw) {
   };
 }
 
+// Converts a raw ml amount to the most human-readable shopping display unit.
+// Priority: weight (if density known and preferring weight) → cups/tbsp/tsp fallback.
+// Also detects herb-type ingredients and returns a bunch count instead.
+function humanizeVolumeUnit(amount, unit, ingredientName = "") {
+  if (unit !== "ml") return { amount, unit, bunches: 0 };
+
+  const normalizedName = normalizeSearchText(ingredientName);
+
+  // Herb bunch conversion
+  const isHerb = [...HERB_BUNCH_INGREDIENTS].some((herb) => {
+    const h = normalizeSearchText(herb);
+    return normalizedName === h || normalizedName.includes(h) || h.includes(normalizedName);
+  });
+  if (isHerb) {
+    const bunches = Math.max(1, Math.ceil(amount / HERB_BUNCH_ML));
+    return { amount: bunches, unit: bunches === 1 ? "bunch" : "bunches", bunches };
+  }
+
+  // Weight conversion via density
+  if (ACTIVE_MEASUREMENT_PREFERENCE === "weight" || ACTIVE_MEASUREMENT_PREFERENCE === "both") {
+    const density = estimateIngredientDensityGPerMl(ingredientName);
+    if (Number.isFinite(density) && density > 0) {
+      const grams = Math.round(amount * density);
+      if (grams > 0) return { amount: grams, unit: "g", bunches: 0 };
+    }
+  }
+
+  // Volume fallback: cups / tbsp / tsp
+  const cupMl = ACTIVE_MEASUREMENT_PROFILE.cupMl;
+  const tbspMl = ACTIVE_MEASUREMENT_PROFILE.tbspMl;
+  const tspMl = ACTIVE_MEASUREMENT_PROFILE.tspMl;
+
+  if (amount >= cupMl * 0.25) {
+    const cups = Number((amount / cupMl).toFixed(2));
+    return { amount: cups, unit: cups <= 1 ? "cup" : "cups", bunches: 0 };
+  }
+  if (amount >= tbspMl * 0.75) {
+    const tbsp = Number((amount / tbspMl).toFixed(1));
+    return { amount: tbsp, unit: "tbsp", bunches: 0 };
+  }
+  const tsp = Number((amount / tspMl).toFixed(1));
+  return { amount: tsp, unit: "tsp", bunches: 0 };
+}
+
 function buildStandardBody(sectionMap) {
   const ingredients = sectionMap.ingredients?.length
     ? sectionMap.ingredients
@@ -1906,6 +2248,362 @@ function normalizeDurationText(value) {
   if (minutes > 0) parts.push(`${minutes}m`);
   if (seconds > 0 && parts.length === 0) parts.push(`${seconds}s`);
   return parts.join(" ") || raw;
+}
+
+function decodeHtmlEntities(text) {
+  const entityMap = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: "\"",
+    apos: "'",
+    nbsp: " ",
+  };
+  return String(text || "").replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
+    const key = String(entity || "").toLowerCase();
+    if (key.startsWith("#x")) {
+      const codePoint = Number.parseInt(key.slice(2), 16);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+    if (key.startsWith("#")) {
+      const codePoint = Number.parseInt(key.slice(1), 10);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+    return Object.prototype.hasOwnProperty.call(entityMap, key) ? entityMap[key] : match;
+  });
+}
+
+function extractBalancedJsonSegment(text, startIndex) {
+  const source = String(text || "");
+  const openingChar = source[startIndex];
+  const closingChar = openingChar === "[" ? "]" : "}";
+  if (openingChar !== "{" && openingChar !== "[") return "";
+
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+
+  for (let index = startIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (char === "\\") {
+        escaping = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === openingChar) {
+      depth += 1;
+      continue;
+    }
+    if (char === closingChar) {
+      depth -= 1;
+      if (depth === 0) return source.slice(startIndex, index + 1);
+    }
+  }
+
+  return "";
+}
+
+function extractJsonSegmentAfterMarker(text, marker, openingChar) {
+  const source = String(text || "");
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) return "";
+  const startIndex = source.indexOf(openingChar, markerIndex + marker.length);
+  if (startIndex === -1) return "";
+  return extractBalancedJsonSegment(source, startIndex);
+}
+
+function isYouTubeUrl(url) {
+  return /(?:youtube\.com|youtu\.be)/i.test(String(url || ""));
+}
+
+function extractSourceTitleFromHtml(html) {
+  const source = String(html || "");
+  const ogMatch = source.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
+  if (ogMatch?.[1]) {
+    return normalizeSingleLineText(decodeHtmlEntities(ogMatch[1]));
+  }
+  const titleMatch = source.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (!titleMatch?.[1]) return "";
+  return normalizeSingleLineText(
+    decodeHtmlEntities(String(titleMatch[1] || "").replace(/\s*-\s*YouTube\s*$/i, ""))
+  );
+}
+
+function decodeJsonEscapedString(value) {
+  const raw = String(value || "");
+  if (!raw) return "";
+  try {
+    return JSON.parse(`"${raw.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`);
+  } catch {
+    return decodeHtmlEntities(raw);
+  }
+}
+
+function extractYouTubeShortDescriptionFromHtml(html) {
+  const source = String(html || "");
+  const match = source.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
+  if (!match?.[1]) return "";
+  return String(decodeJsonEscapedString(match[1] || ""))
+    .replace(/\r\n?/g, "\n")
+    .trim();
+}
+
+function extractContextSection(text, heading) {
+  const source = String(text || "");
+  const pattern = new RegExp(`${heading}:\\n([\\s\\S]*?)(?:\\n\\n[A-Z][^\\n]*:\\n|$)`);
+  const match = source.match(pattern);
+  return String(match?.[1] || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => normalizeSingleLineText(line).replace(/\s+([,.!?;:])/g, "$1"))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function extractContextSingleLineValue(text, label) {
+  const source = String(text || "");
+  const pattern = new RegExp(`^${label}:\\s*(.+)$`, "mi");
+  const match = source.match(pattern);
+  return normalizeSingleLineText(match?.[1] || "");
+}
+
+function extractRecipeCountHint(text) {
+  const source = normalizeSearchText(text);
+  if (!source) return 0;
+  const digitMatch = source.match(/\b([2-9]|1[0-2])\s+(?:ways|recipes|versions|methods|variations)\b/);
+  if (digitMatch) return Number(digitMatch[1]);
+  const wordMap = {
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+  };
+  for (const [word, value] of Object.entries(wordMap)) {
+    if (new RegExp(`\\b${word}\\s+(?:ways|recipes|versions|methods|variations)\\b`).test(source)) {
+      return value;
+    }
+  }
+  return 0;
+}
+
+function buildWayTitle(sourceTitle, ordinal) {
+  const cleanTitle = normalizeSingleLineText(
+    String(sourceTitle || "")
+      .replace(/\s*[-–—]\s*\d+\s+(?:ways|recipes|versions|methods|variations)\b.*$/i, "")
+  ) || "Recipe";
+  return `${cleanTitle} - Way ${ordinal}`;
+}
+
+function extractRecipeTargetsFromDescription(descriptionText) {
+  const lines = String(descriptionText || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trim());
+  const targets = [];
+  let insideRecipeList = false;
+  for (const line of lines) {
+    if (!insideRecipeList) {
+      if (/^in the video we share\s*:?\s*$/i.test(line)) {
+        insideRecipeList = true;
+      }
+      continue;
+    }
+    if (!line) {
+      if (targets.length > 0) break;
+      continue;
+    }
+    if (/^(plus|if you're new|subscribe|follow|make sure to check out)/i.test(line)) break;
+    const bulletMatch = line.match(/^[*+-]\s*(.+)$/);
+    if (!bulletMatch?.[1]) continue;
+    const title = normalizeSingleLineText(bulletMatch[1]);
+    if (!title) continue;
+    targets.push({
+      title,
+      evidence: title,
+    });
+  }
+  return targets;
+}
+
+function buildOrdinalWayRegex(ordinal) {
+  const defs = {
+    1: "(?:first|1st|one)",
+    2: "(?:second|2nd|two)",
+    3: "(?:third|3rd|three)",
+    4: "(?:fourth|4th|four)",
+    5: "(?:fifth|5th|five)",
+    6: "(?:sixth|6th|six)",
+    7: "(?:seventh|7th|seven)",
+    8: "(?:eighth|8th|eight)",
+    9: "(?:ninth|9th|nine)",
+    10: "(?:tenth|10th|ten)",
+    11: "(?:eleventh|11th|eleven)",
+    12: "(?:twelfth|12th|twelve)",
+  };
+  const token = defs[ordinal];
+  if (!token) return null;
+  return new RegExp(`\\b(?:the\\s+)?(?:${token})\\b(?:[^\\n]{0,60})\\b(?:way|recipe|version|method|variation)\\b`, "i");
+}
+
+function segmentTranscriptByWayMarkers(transcriptText, countHint, sourceTitle = "") {
+  const lines = String(transcriptText || "")
+    .split(/\n+/)
+    .map((line) => normalizeSingleLineText(line))
+    .filter(Boolean);
+  if (lines.length === 0 || countHint < 2) return [];
+
+  const markers = [];
+  for (let ordinal = 1; ordinal <= countHint; ordinal += 1) {
+    const regex = buildOrdinalWayRegex(ordinal);
+    if (!regex) return [];
+    const index = lines.findIndex((line, lineIndex) => lineIndex > (markers[markers.length - 1]?.index ?? -1) && regex.test(line));
+    if (index === -1) return [];
+    markers.push({
+      ordinal,
+      index,
+      evidence: lines[index],
+      title: buildWayTitle(sourceTitle, ordinal),
+    });
+  }
+
+  const segments = [];
+  for (let idx = 0; idx < markers.length; idx += 1) {
+    const start = markers[idx].index;
+    const end = idx + 1 < markers.length ? markers[idx + 1].index : lines.length;
+    const segmentLines = lines.slice(start, end);
+    if (segmentLines.length === 0) continue;
+    segments.push({
+      title: markers[idx].title,
+      evidence: markers[idx].evidence,
+      transcriptText: segmentLines.join("\n"),
+    });
+  }
+
+  return segments;
+}
+
+function extractYouTubeCaptionTracksFromHtml(html) {
+  const source = String(html || "");
+  const markers = [
+    "\"captionTracks\":",
+    "\"captionTracks\" :",
+  ];
+  for (const marker of markers) {
+    const jsonText = extractJsonSegmentAfterMarker(source, marker, "[");
+    if (!jsonText) continue;
+    try {
+      const parsed = JSON.parse(jsonText);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // keep scanning
+    }
+  }
+  return [];
+}
+
+function selectPreferredYouTubeCaptionTrack(tracks) {
+  if (!Array.isArray(tracks) || tracks.length === 0) return null;
+  const scoreTrack = (track) => {
+    const languageCode = normalizeSearchText(track?.languageCode || "");
+    const vssId = normalizeSearchText(track?.vssId || "");
+    const name = normalizeSearchText(firstStringValue(track?.name));
+    let score = 0;
+    if (track?.kind !== "asr") score += 100;
+    if (/^en(?:[-_]|$)/.test(languageCode)) score += 60;
+    if (/^\.en(?:[-_]|$)/.test(vssId) || /\.en\b/.test(vssId)) score += 40;
+    if (name.includes("english")) score += 30;
+    if (track?.isTranslatable) score += 5;
+    return score;
+  };
+
+  return [...tracks].sort((a, b) => scoreTrack(b) - scoreTrack(a))[0] || null;
+}
+
+function buildYouTubeTranscriptRequestUrl(track) {
+  const baseUrl = firstStringValue(track?.baseUrl || track?.base_url);
+  if (!baseUrl) return "";
+  if (/[?&]fmt=/.test(baseUrl)) return baseUrl;
+  return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}fmt=json3`;
+}
+
+function parseYouTubeTranscriptJson3(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+
+  try {
+    const parsed = JSON.parse(raw);
+    const events = Array.isArray(parsed?.events) ? parsed.events : [];
+    const lines = events
+      .map((event) => {
+        const segs = Array.isArray(event?.segs) ? event.segs : [];
+        return normalizeSingleLineText(decodeHtmlEntities(segs.map((seg) => String(seg?.utf8 || "")).join("")));
+      })
+      .filter(Boolean);
+    return normalizeOrderedStringArray(lines).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function parseYouTubeTranscriptXml(text) {
+  const raw = String(text || "");
+  const lines = [];
+  const re = /<text\b[^>]*>([\s\S]*?)<\/text>/gi;
+  let match;
+  while ((match = re.exec(raw))) {
+    const line = normalizeSingleLineText(
+      decodeHtmlEntities(String(match[1] || "").replace(/<[^>]+>/g, " "))
+    );
+    if (line) lines.push(line);
+  }
+  return normalizeOrderedStringArray(lines).join("\n");
+}
+
+function parseYouTubeTranscriptText(text) {
+  return parseYouTubeTranscriptJson3(text) || parseYouTubeTranscriptXml(text) || "";
+}
+
+function assembleUrlTranscriptionContext({
+  url = "",
+  pageText = "",
+  transcriptText = "",
+  sourceType = "",
+  sourceTitle = "",
+  descriptionText = "",
+  includePageText = true,
+} = {}) {
+  const sections = [`URL: ${normalizeSingleLineText(url)}`];
+  const normalizedSourceType = normalizeSingleLineText(sourceType);
+  if (normalizedSourceType) sections.push(`Source type: ${normalizedSourceType}`);
+  const normalizedSourceTitle = normalizeSingleLineText(sourceTitle);
+  if (normalizedSourceTitle) sections.push(`Source title: ${normalizedSourceTitle}`);
+  const description = String(descriptionText || "").trim();
+  if (description) sections.push(`Description:\n${description.slice(0, 8000)}`);
+  const transcript = String(transcriptText || "").trim();
+  const page = String(pageText || "").trim();
+  if (transcript) sections.push(`Transcript:\n${transcript.slice(0, 24000)}`);
+  if (includePageText && page) {
+    sections.push(`${transcript ? "Page text" : "Content"}:\n${page.slice(0, transcript ? 8000 : 18000)}`);
+  }
+  return sections.join("\n\n");
 }
 
 function extractImageUrl(value) {
@@ -2057,6 +2755,7 @@ function extractRecipeSeedFromHtml(html, sourceUrl = "") {
 function mergeTranscribedRecipeData(primary, seed, sourceUrl = "") {
   const base = primary && typeof primary === "object" ? primary : {};
   const fallback = seed && typeof seed === "object" ? seed : {};
+  const normalizedSourceUrl = normalizeSingleLineText(sourceUrl);
   const titlePrimary = normalizeSingleLineText(base.title);
   const titleFallback = normalizeSingleLineText(fallback.title);
   const title = (!titlePrimary || /^https?:\/\//i.test(titlePrimary))
@@ -2078,7 +2777,7 @@ function mergeTranscribedRecipeData(primary, seed, sourceUrl = "") {
     prepTime: normalizeDurationText(base.prepTime || base.prep_time || base.prep || fallback.prepTime),
     cookTime: normalizeDurationText(base.cookTime || base.cook_time || base.cook || fallback.cookTime),
     portions: firstStringValue(base.portions || base.servings || base.recipeYield || fallback.portions),
-    link: firstStringValue(base.link || base.url || fallback.link || sourceUrl),
+    link: firstStringValue(normalizedSourceUrl || base.link || base.url || fallback.link),
     cover: firstStringValue(base.cover || base.image || base.thumbnail || fallback.cover),
   };
 }
@@ -2435,6 +3134,19 @@ class TextEntryModal extends Modal {
     input.style.width = "100%";
     input.style.marginBottom = "12px";
 
+    let checkbox = null;
+    if (this.options.checkboxLabel) {
+      const checkboxRow = contentEl.createEl("label");
+      checkboxRow.style.display = "flex";
+      checkboxRow.style.alignItems = "center";
+      checkboxRow.style.gap = "8px";
+      checkboxRow.style.marginBottom = "12px";
+
+      checkbox = checkboxRow.createEl("input", { type: "checkbox" });
+      checkbox.checked = this.options.checkboxValue === true;
+      checkboxRow.createEl("span", { text: this.options.checkboxLabel });
+    }
+
     const buttons = contentEl.createDiv();
     buttons.style.display = "flex";
     buttons.style.justifyContent = "flex-end";
@@ -2452,7 +3164,14 @@ class TextEntryModal extends Modal {
         return;
       }
       this.submitted = true;
-      this.options.onSubmit?.(value);
+      this.options.onSubmit?.(
+        checkbox
+          ? {
+            value,
+            checkboxValue: checkbox.checked,
+          }
+          : value
+      );
       this.close();
     };
 
@@ -2585,6 +3304,75 @@ class TemplateSetupModal extends Modal {
   }
 }
 
+class TranscribedIngredientReviewModal extends Modal {
+  constructor(app, { title, rawIngredients, onSave, onDiscard }) {
+    super(app);
+    this.recipeTitle = title;
+    this.rawIngredients = [...rawIngredients];
+    this.onSave = onSave;
+    this.onDiscard = onDiscard;
+    this.saved = false;
+  }
+
+  onOpen() {
+    this.contentEl.empty();
+    this.contentEl.createEl("h2", { text: `Review ingredients: ${this.recipeTitle}` });
+    this.contentEl.createEl("p", {
+      text: "Edit or remove lines below before saving. Each line is one ingredient as returned by AI.",
+      cls: "setting-item-description",
+    });
+
+    this.listContainer = this.contentEl.createDiv();
+    this.renderList();
+
+    const btnRow = this.contentEl.createDiv({ cls: "modal-button-container" });
+    const discardBtn = btnRow.createEl("button", { text: "Discard recipe" });
+    discardBtn.addEventListener("click", () => {
+      this.saved = false;
+      this.close();
+    });
+    const saveBtn = btnRow.createEl("button", { text: "Save recipe", cls: "mod-cta" });
+    saveBtn.addEventListener("click", () => {
+      this.saved = true;
+      this.close();
+    });
+  }
+
+  renderList() {
+    this.listContainer.empty();
+    this.rawIngredients.forEach((line, index) => {
+      const row = this.listContainer.createDiv({ cls: "setting-item" });
+      const input = row.createEl("input", { type: "text", cls: "wms-review-input" });
+      input.value = line;
+      input.style.flex = "1";
+      input.addEventListener("input", () => { this.rawIngredients[index] = input.value; });
+      const deleteBtn = row.createEl("button", { text: "×" });
+      deleteBtn.style.marginLeft = "8px";
+      deleteBtn.addEventListener("click", () => {
+        this.rawIngredients.splice(index, 1);
+        this.renderList();
+      });
+    });
+    const addBtn = this.listContainer.createEl("button", { text: "+ Add ingredient line" });
+    addBtn.style.marginTop = "8px";
+    addBtn.addEventListener("click", () => {
+      this.rawIngredients.push("");
+      this.renderList();
+      const inputs = this.listContainer.querySelectorAll(".wms-review-input");
+      if (inputs.length > 0) inputs[inputs.length - 1].focus();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    if (this.saved) {
+      this.onSave?.(this.rawIngredients.filter((l) => l.trim()));
+    } else {
+      this.onDiscard?.();
+    }
+  }
+}
+
 class WeeklyMealShopperPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -2635,14 +3423,29 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     this.addCommand({
       id: "set-active-canvas-as-weekly-plan",
-      name: "Set active canvas as weekly meal plan",
+      name: "Set active canvas as meal plan canvas (primary)",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "canvas") return false;
         if (!checking) {
           this.settings.weeklyCanvasPath = file.path;
           this.saveSettings();
-          new Notice(`Weekly meal plan canvas set to ${file.path}`);
+          new Notice(`Meal plan canvas (primary) set to ${file.path}`);
+        }
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "set-active-canvas-as-second-plan",
+      name: "Set active canvas as meal plan canvas (second prep session)",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "canvas") return false;
+        if (!checking) {
+          this.settings.weeklyCanvasPath2 = file.path;
+          this.saveSettings();
+          new Notice(`Meal plan canvas (second prep session) set to ${file.path}`);
         }
         return true;
       },
@@ -2741,7 +3544,7 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     this.addCommand({
       id: "create-weekly-meal-prep-canvas",
-      name: "Create weekly meal-prep canvas",
+      name: "Open or create meal plan canvas",
       callback: async () => {
         await this.createWeeklyMealPrepCanvas();
       },
@@ -2928,17 +3731,15 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   async createWeeklyMealPrepCanvas() {
-    const folder = normalizePath(this.settings.mealPrepCanvasFolder || "Utility");
-    const fileName = this.buildMealPrepCanvasFilename();
+    const canvasPath = normalizePath(this.settings.weeklyCanvasPath || DEFAULT_SETTINGS.weeklyCanvasPath);
+    const parts = canvasPath.split("/");
+    const folder = parts.slice(0, -1).join("/") || ".";
     await this.ensureFolderPathExists(folder);
 
-    const path = normalizePath(`${folder}/${fileName}`);
-    const existing = this.app.vault.getAbstractFileByPath(path);
+    const existing = this.app.vault.getAbstractFileByPath(canvasPath);
     if (existing instanceof TFile && existing.extension === "canvas") {
-      this.settings.weeklyCanvasPath = existing.path;
-      await this.saveSettings();
       await this.app.workspace.getLeaf(true).openFile(existing);
-      new Notice(`Opened existing meal-prep canvas: ${existing.path}`);
+      new Notice(`Opened meal plan canvas: ${existing.path}`);
       return existing;
     }
 
@@ -2953,13 +3754,11 @@ class WeeklyMealShopperPlugin extends Plugin {
       return null;
     }
     const created = await this.app.vault.create(
-      path,
+      canvasPath,
       templateContent.endsWith("\n") ? templateContent : `${templateContent}\n`
     );
-    this.settings.weeklyCanvasPath = created.path;
-    await this.saveSettings();
     await this.app.workspace.getLeaf(true).openFile(created);
-    new Notice(`Created meal-prep canvas: ${created.path}`);
+    new Notice(`Created meal plan canvas: ${created.path}`);
     return created;
   }
 
@@ -3128,7 +3927,13 @@ class WeeklyMealShopperPlugin extends Plugin {
     return await new Promise((resolve) => {
       const modal = new TextEntryModal(this.app, {
         ...options,
-        onSubmit: (value) => resolve({ value }),
+        onSubmit: (result) => {
+          if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "value")) {
+            resolve(result);
+            return;
+          }
+          resolve({ value: result });
+        },
         onCancel: () => resolve({ cancelled: true }),
       });
       modal.open();
@@ -3141,6 +3946,18 @@ class WeeklyMealShopperPlugin extends Plugin {
         ...options,
         onSubmit: (value) => resolve(value),
         onCancel: () => resolve({ cancelled: true }),
+      });
+      modal.open();
+    });
+  }
+
+  async showTranscribedIngredientReview(title, rawIngredients) {
+    return new Promise((resolve) => {
+      const modal = new TranscribedIngredientReviewModal(this.app, {
+        title,
+        rawIngredients,
+        onSave: (lines) => resolve(lines),
+        onDiscard: () => resolve(null),
       });
       modal.open();
     });
@@ -3382,10 +4199,32 @@ class WeeklyMealShopperPlugin extends Plugin {
   extractFirstJsonObject(text) {
     const raw = String(text || "").trim();
     if (!raw) return "";
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start === -1 || end === -1 || end < start) return "";
-    return raw.slice(start, end + 1);
+    const candidates = [
+      raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim(),
+    ];
+
+    const objectStart = raw.indexOf("{");
+    const objectEnd = raw.lastIndexOf("}");
+    if (objectStart !== -1 && objectEnd !== -1 && objectEnd >= objectStart) {
+      candidates.push(raw.slice(objectStart, objectEnd + 1).trim());
+    }
+
+    const arrayStart = raw.indexOf("[");
+    const arrayEnd = raw.lastIndexOf("]");
+    if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd >= arrayStart) {
+      candidates.push(raw.slice(arrayStart, arrayEnd + 1).trim());
+    }
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        JSON.parse(candidate);
+        return candidate;
+      } catch {
+        // keep scanning
+      }
+    }
+    return "";
   }
 
   sanitizeRecipeFilename(name) {
@@ -3404,6 +4243,41 @@ class WeeklyMealShopperPlugin extends Plugin {
       .replace(/\s+/g, " ")
       .trim();
     return text.slice(0, 18000);
+  }
+
+  buildUrlTranscriptionContext({
+    url = "",
+    rawHtml = "",
+    transcriptText = "",
+    sourceTitle = "",
+    descriptionText = "",
+  } = {}) {
+    const youtube = isYouTubeUrl(url);
+    const normalizedTranscript = String(transcriptText || "").trim();
+    return assembleUrlTranscriptionContext({
+      url,
+      pageText: this.stripHtmlForPrompt(rawHtml),
+      transcriptText: normalizedTranscript,
+      sourceType: youtube ? "YouTube video" : "Web page",
+      sourceTitle: sourceTitle || extractSourceTitleFromHtml(rawHtml),
+      descriptionText: descriptionText || (youtube ? extractYouTubeShortDescriptionFromHtml(rawHtml) : ""),
+      includePageText: !(youtube && normalizedTranscript),
+    });
+  }
+
+  async fetchYouTubeTranscriptFromHtml(html, fetchImpl = requestUrl) {
+    const tracks = extractYouTubeCaptionTracksFromHtml(html);
+    const selectedTrack = selectPreferredYouTubeCaptionTrack(tracks);
+    const transcriptUrl = buildYouTubeTranscriptRequestUrl(selectedTrack);
+    if (!transcriptUrl) return "";
+
+    try {
+      const response = await fetchImpl({ url: transcriptUrl, method: "GET" });
+      return parseYouTubeTranscriptText(response?.text || "");
+    } catch (error) {
+      console.warn("[weekly-meal-shopper] Could not fetch YouTube transcript:", error);
+      return "";
+    }
   }
 
   getImageMimeType(ext) {
@@ -3504,10 +4378,35 @@ class WeeklyMealShopperPlugin extends Plugin {
     };
   }
 
+  normalizeTranscribedRecipeCollection(raw, fallbackTitle) {
+    const candidates = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.recipes)
+        ? raw.recipes
+        : raw && typeof raw === "object"
+          ? [raw]
+          : [];
+
+    return candidates
+      .map((candidate, index) => this.normalizeTranscribedRecipeData(
+        candidate,
+        candidates.length > 1 ? `${fallbackTitle} ${index + 1}` : fallbackTitle
+      ))
+      .filter((recipe) => (
+        recipe.title
+        || recipe.ingredients.length > 0
+        || recipe.directions.length > 0
+        || recipe.notes.length > 0
+        || recipe.link
+        || recipe.cover
+      ));
+  }
+
   normalizeTranscribedIngredientLines(ingredientLines, { metricMode = true } = {}) {
-    const cleaned = normalizeStringArray(ingredientLines).map(
-      (line) => normalizeNutIngredientTerms(String(line).replace(/^[-*+]\s+/, "").trim())
-    );
+    const cleaned = normalizeStringArray(ingredientLines)
+      .map((line) => normalizeLegacyIngredientText(String(line).replace(/^[-*+]\s+/, "").trim()))
+      .map((line) => normalizeNutIngredientTerms(line))
+      .filter((line) => line && !looksLikeIngredientSubheadingLine(line));
     const lines = [];
     for (const line of cleaned) {
       const parsed = parseIngredientLine(`- ${line}`, ACTIVE_UNIT_MAP, { allowLegacy: true });
@@ -3556,32 +4455,13 @@ class WeeklyMealShopperPlugin extends Plugin {
     );
   }
 
-  async transcribeWithOpenAI({ sourceLabel, textContext = "", imageDataUrl = "" }) {
+  async requestOpenAIJsonResponse({ content, missingJsonMessage = "Model response did not include valid JSON output." }) {
     const apiKey = await this.resolveTranscriptionApiKey();
     if (!apiKey) {
       throw new Error("Set an OpenAI API key in plugin settings (or OPENAI_API_KEY env var).");
     }
 
     const model = String(this.settings.transcriptionModel || "gpt-4.1-mini").trim() || "gpt-4.1-mini";
-    const instruction = [
-      "Transcribe a recipe into structured JSON.",
-      "Return only JSON with this shape:",
-      "{\"title\":\"...\",\"ingredients\":[\"...\"],\"directions\":[\"...\"],\"notes\":[\"...\"],\"prepTime\":\"...\",\"cookTime\":\"...\",\"portions\":\"...\",\"cover\":\"...\",\"link\":\"...\"}",
-      "Keep ingredient and direction text concise and clean.",
-      "Ingredient strings should stay close to 'amount unit ingredient, preparation' when a preparation detail is clear.",
-      "Keep explicit countable units like can, clove, clove(s), piece, and egg when they are present.",
-      "Directions should explicitly reference ingredient names so each listed ingredient can be matched in steps.",
-      "Prefer specific ingredient terms over generic ones (example: use 'pecan nuts' rather than only 'nuts').",
-      "If details are missing, infer minimally and avoid fabricating specifics.",
-    ].join(" ");
-
-    const content = [
-      { type: "input_text", text: instruction },
-      { type: "input_text", text: `Source: ${sourceLabel}` },
-    ];
-    if (textContext) content.push({ type: "input_text", text: `Content:\n${textContext}` });
-    if (imageDataUrl) content.push({ type: "input_image", image_url: imageDataUrl });
-
     const response = await this.requestOpenAIResponsesWithRetry({
       apiKey,
       model,
@@ -3597,17 +4477,231 @@ class WeeklyMealShopperPlugin extends Plugin {
     );
     const jsonText = this.extractFirstJsonObject(outputText);
     if (!jsonText) {
-      throw new Error("Model response did not include valid JSON recipe output.");
+      throw new Error(missingJsonMessage);
     }
 
-    let parsed;
     try {
-      parsed = JSON.parse(jsonText);
+      return JSON.parse(jsonText);
     } catch {
       throw new Error("Could not parse JSON from model response.");
     }
+  }
 
-    return this.normalizeTranscribedRecipeData(parsed, sourceLabel);
+  normalizeDiscoveredRecipeTargets(raw) {
+    const candidates = Array.isArray(raw?.recipes)
+      ? raw.recipes
+      : Array.isArray(raw)
+        ? raw
+        : [];
+    const seen = new Set();
+    const targets = [];
+    for (const candidate of candidates) {
+      const title = normalizeSingleLineText(
+        typeof candidate === "string"
+          ? candidate
+          : candidate?.title
+      );
+      const evidence = normalizeSingleLineText(
+        typeof candidate === "object" && candidate
+          ? candidate.evidence
+          : ""
+      );
+      const key = normalizeSearchText(title);
+      if (!title || !key || seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ title, evidence });
+    }
+    return targets;
+  }
+
+  async discoverRecipeTargetsWithOpenAI({ sourceLabel, textContext = "", expectedRecipeCount = 0 }) {
+    const instruction = [
+      "Identify every distinct recipe explicitly taught in the source.",
+      "Return only JSON with this shape:",
+      "{\"recipes\":[{\"title\":\"...\",\"evidence\":\"...\"}]}",
+      "A recipe counts only if the source explicitly teaches how to make it with its own ingredients, steps, or a clearly separate preparation sequence.",
+      "Component recipes like almond milk, sauces, broths, spice mixes, and curry pastes count only when the source actually explains how to make them.",
+      "Do not invent recipes.",
+      "Do not include serving suggestions, substitutions, toppings, asides, or passing mentions as recipes.",
+      "evidence must be a short exact phrase or sentence fragment from the source proving the recipe exists.",
+      expectedRecipeCount > 1
+        ? `The source metadata suggests ${expectedRecipeCount} recipe variations. If the transcript clearly presents them as separate ways, return ${expectedRecipeCount} items.`
+        : "If there is only one explicit recipe, return one item.",
+    ].join(" ");
+    const content = [
+      { type: "input_text", text: instruction },
+      { type: "input_text", text: `Source: ${sourceLabel}` },
+    ];
+    if (textContext) content.push({ type: "input_text", text: `Content:\n${textContext}` });
+    const parsed = await this.requestOpenAIJsonResponse({
+      content,
+      missingJsonMessage: "Model response did not include valid JSON recipe discovery output.",
+    });
+    return this.normalizeDiscoveredRecipeTargets(parsed);
+  }
+
+  async transcribeNamedRecipeWithOpenAI({ sourceLabel, textContext = "", recipeTitle = "", recipeEvidence = "" }) {
+    const recipeShape = "{\"title\":\"...\",\"ingredients\":[\"...\"],\"directions\":[\"...\"],\"notes\":[\"...\"],\"prepTime\":\"...\",\"cookTime\":\"...\",\"portions\":\"...\",\"cover\":\"...\",\"link\":\"...\"}";
+    const instruction = [
+      "Transcribe exactly one recipe into structured JSON.",
+      "Return only JSON with this shape:",
+      recipeShape,
+      "Transcribe only the named target recipe.",
+      "Ignore other recipes in the source.",
+      "Keep ingredient and direction text concise and clean.",
+      "Ingredient strings should stay close to 'amount unit ingredient, preparation' when a preparation detail is clear.",
+      "Keep explicit countable units like can, clove, clove(s), piece, and egg when they are present.",
+      "For fresh herbs (parsley, coriander, basil, cilantro, mint, dill, chives, sage, rosemary, thyme, oregano), use 'bunch' or 'cup' as the unit — never grams or millilitres.",
+      "For liquid condiments (soy sauce, fish sauce, vinegar, sriracha, tamari, Worcestershire), use tablespoon or teaspoon (tbsp / tsp) — not grams or ml.",
+      "Directions should explicitly reference ingredient names so each listed ingredient can be matched in steps.",
+      "Prefer specific ingredient terms over generic ones (example: use 'pecan nuts' rather than only 'nuts').",
+      "Use only information explicitly present in the source content.",
+      "Do not invent recipes, ingredients, quantities, timings, or steps from context clues or general cooking knowledge.",
+      "Do not turn passing mentions, serving ideas, substitutions, or unrelated chatter into standalone recipes.",
+      "Preserve any component recipes or preparatory sub-recipes taught in the source (example: homemade almond milk, sauces, broths, curry pastes, spice mixes).",
+      "Only create a separate component recipe when the source explicitly explains how to make that component.",
+      "If a component is mentioned but not actually taught, keep it inside the parent recipe as an ingredient or note instead of creating a new recipe.",
+      "Do not replace a described homemade component with a store-bought shortcut unless the source itself does.",
+      "If details are missing, leave them blank or keep the wording partial; do not fill gaps by guessing.",
+      "For YouTube transcripts, ignore introductions, sponsorships, jokes, and unrelated conversation.",
+    ].join(" ");
+    const content = [
+      { type: "input_text", text: instruction },
+      { type: "input_text", text: `Source: ${sourceLabel}` },
+      { type: "input_text", text: `Target recipe: ${recipeTitle}` },
+    ];
+    if (recipeEvidence) content.push({ type: "input_text", text: `Evidence: ${recipeEvidence}` });
+    if (textContext) content.push({ type: "input_text", text: `Content:\n${textContext}` });
+    const parsed = await this.requestOpenAIJsonResponse({
+      content,
+      missingJsonMessage: "Model response did not include valid JSON recipe output.",
+    });
+    return this.normalizeTranscribedRecipeData(parsed, recipeTitle || sourceLabel);
+  }
+
+  async transcribeWithOpenAI({ sourceLabel, textContext = "", imageDataUrl = "", allowMultipleRecipes = false }) {
+    if (allowMultipleRecipes && isYouTubeUrl(sourceLabel) && textContext) {
+      const sourceTitle = extractContextSingleLineValue(textContext, "Source title");
+      const descriptionText = extractContextSection(textContext, "Description");
+      const transcriptText = extractContextSection(textContext, "Transcript");
+      const explicitTargets = extractRecipeTargetsFromDescription(descriptionText);
+      if (explicitTargets.length > 1) {
+        const recipes = [];
+        for (const target of explicitTargets.slice(0, 12)) {
+          const recipe = await this.transcribeNamedRecipeWithOpenAI({
+            sourceLabel,
+            textContext,
+            recipeTitle: target.title,
+            recipeEvidence: target.evidence,
+          });
+          recipes.push(recipe);
+        }
+        if (recipes.length > 0) return recipes;
+      }
+      const expectedRecipeCount = extractRecipeCountHint(sourceTitle);
+      const targets = await this.discoverRecipeTargetsWithOpenAI({
+        sourceLabel,
+        textContext,
+        expectedRecipeCount,
+      });
+      if (targets.length > 1) {
+        const recipes = [];
+        for (const target of targets.slice(0, 12)) {
+          const recipe = await this.transcribeNamedRecipeWithOpenAI({
+            sourceLabel,
+            textContext,
+            recipeTitle: target.title,
+            recipeEvidence: target.evidence,
+          });
+          if (
+            recipe.title
+            || recipe.ingredients.length > 0
+            || recipe.directions.length > 0
+            || recipe.notes.length > 0
+          ) {
+            recipes.push(recipe);
+          }
+        }
+        if (recipes.length > 0) return recipes;
+      }
+      const transcriptSegments = segmentTranscriptByWayMarkers(
+        transcriptText,
+        expectedRecipeCount,
+        sourceTitle
+      );
+      if (transcriptSegments.length > 1) {
+        const recipes = [];
+        for (const segment of transcriptSegments) {
+          const segmentContext = assembleUrlTranscriptionContext({
+            url: sourceLabel,
+            sourceType: "YouTube video",
+            sourceTitle,
+            descriptionText,
+            transcriptText: segment.transcriptText,
+            includePageText: false,
+          });
+          const recipe = await this.transcribeNamedRecipeWithOpenAI({
+            sourceLabel,
+            textContext: segmentContext,
+            recipeTitle: segment.title,
+            recipeEvidence: segment.evidence,
+          });
+          recipes.push(recipe);
+        }
+        if (recipes.length > 0) return recipes;
+      }
+    }
+
+    const recipeShape = "{\"title\":\"...\",\"ingredients\":[\"...\"],\"directions\":[\"...\"],\"notes\":[\"...\"],\"prepTime\":\"...\",\"cookTime\":\"...\",\"portions\":\"...\",\"cover\":\"...\",\"link\":\"...\"}";
+    const instruction = [
+      allowMultipleRecipes
+        ? "Transcribe one or more recipes into structured JSON."
+        : "Transcribe a recipe into structured JSON.",
+      "Return only JSON with this shape:",
+      allowMultipleRecipes
+        ? `{"recipes":[${recipeShape}]}`
+        : recipeShape,
+      "Keep ingredient and direction text concise and clean.",
+      "Ingredient strings should stay close to 'amount unit ingredient, preparation' when a preparation detail is clear.",
+      "Keep explicit countable units like can, clove, clove(s), piece, and egg when they are present.",
+      // Unit preference rules
+      "For fresh herbs (parsley, coriander, basil, cilantro, mint, dill, chives, sage, rosemary, thyme, oregano), use 'bunch' or 'cup' as the unit — never grams or millilitres.",
+      "For flour, sugar, butter, and dry baking ingredients: if the source gives cups, keep cups; if the source gives weight, keep weight.",
+      "For canned goods, use 'can' as the unit with the can size in the preparation field (example: '1 can whole tomatoes, 400g').",
+      "For liquid condiments and sauces (soy sauce, fish sauce, vinegar, sriracha, miso, tamari, Worcestershire), use tablespoon or teaspoon (tbsp / tsp) — not grams or ml.",
+      "Do not express dried spices, ground spices, or small seasoning amounts in ml.",
+      "Directions should explicitly reference ingredient names so each listed ingredient can be matched in steps.",
+      "Prefer specific ingredient terms over generic ones (example: use 'pecan nuts' rather than only 'nuts').",
+      "Use only information explicitly present in the source content.",
+      "Do not invent recipes, ingredients, quantities, timings, or steps from context clues or general cooking knowledge.",
+      "Do not turn passing mentions, serving ideas, substitutions, or unrelated chatter into standalone recipes.",
+      "Preserve any component recipes or preparatory sub-recipes taught in the source (example: homemade almond milk, sauces, broths, curry pastes, spice mixes).",
+      "Only create a separate component recipe when the source explicitly explains how to make that component.",
+      "If a component is mentioned but not actually taught, keep it inside the parent recipe as an ingredient or note instead of creating a new recipe.",
+      "Do not replace a described homemade component with a store-bought shortcut unless the source itself does.",
+      "If details are missing, leave them blank or keep the wording partial; do not fill gaps by guessing.",
+      "For YouTube transcripts, ignore introductions, sponsorships, jokes, and unrelated conversation.",
+      allowMultipleRecipes
+        ? "If the source contains multiple distinct recipes, include each one in the recipes array. If only one recipe is present, return a single-item recipes array."
+        : "",
+    ].join(" ");
+
+    const content = [
+      { type: "input_text", text: instruction },
+      { type: "input_text", text: `Source: ${sourceLabel}` },
+    ];
+    if (textContext) content.push({ type: "input_text", text: `Content:\n${textContext}` });
+    if (imageDataUrl) content.push({ type: "input_image", image_url: imageDataUrl });
+
+    const parsed = await this.requestOpenAIJsonResponse({
+      content,
+      missingJsonMessage: "Model response did not include valid JSON recipe output.",
+    });
+    const recipes = this.normalizeTranscribedRecipeCollection(parsed, sourceLabel);
+    if (recipes.length === 0) {
+      throw new Error("Model response did not include any usable recipe output.");
+    }
+    return allowMultipleRecipes ? recipes : recipes[0];
   }
 
   async alignRecipeSectionsWithOpenAI({ title = "", ingredients = [], directions = [], notes = [] } = {}) {
@@ -3625,6 +4719,8 @@ class WeeklyMealShopperPlugin extends Plugin {
       "Do not invent ingredients, steps, or measurements.",
       "Rewrite ingredient lines so the ingredient name is explicit and preparation is expressed clearly.",
       "Use explicit count units like can, clove, piece, egg, or orange when appropriate.",
+      "For fresh herbs (parsley, coriander, basil, cilantro, mint, dill, chives, sage, rosemary, thyme, oregano), use 'bunch' or 'cup' as the unit — never grams or millilitres.",
+      "For liquid condiments (soy sauce, fish sauce, vinegar, sriracha, tamari, Worcestershire), use tablespoon or teaspoon (tbsp / tsp) — not grams or ml.",
       "If a source ingredient combines multiple actions, rewrite it into parser-friendly text. Example: 'zest and juice of 1 orange' becomes '1 orange, zested and juiced'.",
       "Rewrite directions so they explicitly mention the ingredient names used in the ingredient list, which helps the recipe-view step highlighting match them reliably.",
       "Keep directions concise and preserve the original step order.",
@@ -3742,10 +4838,18 @@ class WeeklyMealShopperPlugin extends Plugin {
     ].join("\n");
   }
 
-  async saveTranscribedRecipeNote(recipe) {
+  async saveTranscribedRecipeNote(recipe, { openFile = true, useOpenAIStandardization = false, showReview = false } = {}) {
     const normalized = this.normalizeTranscribedRecipeData(recipe, recipe?.title || "Transcribed Recipe");
     const metricMode = this.settings.transcriptionMetricOutput !== false;
-    const ingredientLines = this.normalizeTranscribedIngredientLines(normalized.ingredients, { metricMode });
+
+    let rawIngredients = normalized.ingredients;
+    if (showReview) {
+      const reviewed = await this.showTranscribedIngredientReview(normalized.title, rawIngredients);
+      if (reviewed === null) return null;
+      rawIngredients = reviewed;
+    }
+
+    const ingredientLines = this.normalizeTranscribedIngredientLines(rawIngredients, { metricMode });
     const directionLines = this.normalizeTranscribedDirectionLines(normalized.directions, ingredientLines);
     const noteRecipe = {
       ...normalized,
@@ -3761,10 +4865,10 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     const content = this.buildTranscribedRecipeNoteContent(noteRecipe);
     const created = await this.app.vault.create(outputPath, content);
-    await this.standardizeRecipeFile(created);
+    await this.standardizeRecipeFile(created, { useOpenAI: useOpenAIStandardization });
     const parsed = await this.parseIngredientsFromRecipeFile(created);
     await this.saveParsedIngredientsToFrontmatter(created, parsed);
-    await this.app.workspace.getLeaf(true).openFile(created);
+    if (openFile) await this.app.workspace.getLeaf(true).openFile(created);
     return created;
   }
 
@@ -3791,11 +4895,13 @@ class WeeklyMealShopperPlugin extends Plugin {
     const result = await this.promptTextEntry({
       title: "Transcribe Recipe from Link",
       label: "Website or YouTube URL",
+      checkboxLabel: "Input contains multiple recipes",
       submitText: "Transcribe",
     });
     if (result.cancelled) return;
 
     const url = String(result.value || "").trim();
+    const allowMultipleRecipes = result.checkboxValue === true;
     if (!/^https?:\/\//i.test(url)) {
       new Notice("Please enter a valid http(s) URL.");
       return;
@@ -3810,7 +4916,14 @@ class WeeklyMealShopperPlugin extends Plugin {
       if (raw) {
         fetchedRawText = raw;
         seed = extractRecipeSeedFromHtml(raw, url);
-        textContext = `URL: ${url}\n\n${this.stripHtmlForPrompt(raw)}`;
+        const transcriptText = isYouTubeUrl(url)
+          ? await this.fetchYouTubeTranscriptFromHtml(raw)
+          : "";
+        textContext = this.buildUrlTranscriptionContext({
+          url,
+          rawHtml: raw,
+          transcriptText,
+        });
       }
     } catch (error) {
       // If fetch fails, still send URL context to the model.
@@ -3821,10 +4934,31 @@ class WeeklyMealShopperPlugin extends Plugin {
       const transcribed = await this.transcribeWithOpenAI({
         sourceLabel: url,
         textContext,
+        allowMultipleRecipes,
       });
-      const merged = mergeTranscribedRecipeData(transcribed, seed, url);
-      const file = await this.saveTranscribedRecipeNote(merged);
-      new Notice(`Recipe transcribed from URL and saved to ${file.path}.`);
+      const recipes = Array.isArray(transcribed) ? transcribed : [transcribed];
+      const seedFallback = recipes.length > 1
+        ? {
+          link: firstStringValue(seed?.link || url),
+          cover: firstStringValue(seed?.cover),
+        }
+        : seed;
+      const files = [];
+      for (let index = 0; index < recipes.length; index += 1) {
+        const merged = mergeTranscribedRecipeData(recipes[index], seedFallback, url);
+        const file = await this.saveTranscribedRecipeNote(merged, {
+          openFile: index === recipes.length - 1,
+          showReview: true,
+        });
+        if (file === null) continue;
+        files.push(file);
+      }
+      if (files.length === 0) return;
+      if (files.length === 1) {
+        new Notice(`Recipe transcribed from URL and saved to ${files[0].path}.`);
+      } else {
+        new Notice(`${files.length} recipes transcribed from URL and saved to the recipe folder.`);
+      }
     } catch (error) {
       console.error("[weekly-meal-shopper] URL transcription failed:", error);
       try {
@@ -3859,7 +4993,8 @@ class WeeklyMealShopperPlugin extends Plugin {
       return;
     }
 
-    let success = 0;
+    let processedImages = 0;
+    let createdRecipes = 0;
     let failures = 0;
     const failed = [];
     let deleted = 0;
@@ -3870,12 +5005,23 @@ class WeeklyMealShopperPlugin extends Plugin {
         const binary = await this.app.vault.adapter.readBinary(file.path);
         const base64 = Buffer.from(binary).toString("base64");
         const mime = this.getImageMimeType(file.extension);
-        const recipe = await this.transcribeWithOpenAI({
+        const transcribed = await this.transcribeWithOpenAI({
           sourceLabel: file.basename,
           imageDataUrl: `data:${mime};base64,${base64}`,
+          allowMultipleRecipes: true,
         });
-        await this.saveTranscribedRecipeNote(recipe);
-        success += 1;
+        const recipes = Array.isArray(transcribed) ? transcribed : [transcribed];
+        if (recipes.length === 0) {
+          throw new Error("Model response did not include any usable recipe output.");
+        }
+        for (const recipe of recipes) {
+          await this.saveTranscribedRecipeNote(recipe, {
+            openFile: false,
+            useOpenAIStandardization: true,
+          });
+        }
+        processedImages += 1;
+        createdRecipes += recipes.length;
         if (this.settings.deleteTranscribedImages) {
           try {
             await this.deleteSourceImageFile(file);
@@ -3895,19 +5041,19 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     if (failures > 0 || deleteFailures > 0) {
       const deletedText = this.settings.deleteTranscribedImages
-        ? ` ${deleted}/${success} source images deleted.`
+        ? ` ${deleted}/${processedImages} source images deleted.`
         : "";
       const deleteErrorText = deleteFailures > 0
         ? ` ${deleteFailures} delete failed. First delete error: ${failedDeletes[0]}`
         : "";
       new Notice(
-        `Image transcription complete: ${success}/${files.length} created, ${failures} failed.${deletedText}${deleteErrorText}${failures > 0 ? ` First transcription error: ${failed[0]}` : ""}`
+        `Image transcription complete: ${processedImages}/${files.length} images processed, ${createdRecipes} recipes created, ${failures} failed.${deletedText}${deleteErrorText}${failures > 0 ? ` First transcription error: ${failed[0]}` : ""}`
       );
     } else {
       const deletedText = this.settings.deleteTranscribedImages
         ? ` ${deleted} source images deleted.`
         : "";
-      new Notice(`Image transcription complete: ${success}/${files.length} recipes created.${deletedText}`);
+      new Notice(`Image transcription complete: ${processedImages}/${files.length} images processed, ${createdRecipes} recipes created.${deletedText}`);
     }
   }
 
@@ -4876,36 +6022,50 @@ class WeeklyMealShopperPlugin extends Plugin {
 
   async generateWeeklyShoppingList({ applyFrozenInventory = false } = {}) {
     const active = this.app.workspace.getActiveFile();
-    let canvasFile = null;
+    let canvasFiles = [];
 
     if (active && active.extension === "canvas") {
-      canvasFile = active;
+      canvasFiles = [active];
     } else {
-      const configured = normalizePath(this.settings.weeklyCanvasPath);
-      const found = this.app.vault.getAbstractFileByPath(configured);
-      if (found instanceof TFile && found.extension === "canvas") {
-        canvasFile = found;
+      const configured1 = normalizePath(this.settings.weeklyCanvasPath);
+      const found1 = this.app.vault.getAbstractFileByPath(configured1);
+      if (found1 instanceof TFile && found1.extension === "canvas") canvasFiles.push(found1);
+
+      const path2 = String(this.settings.weeklyCanvasPath2 || "").trim();
+      if (path2) {
+        const configured2 = normalizePath(path2);
+        const found2 = this.app.vault.getAbstractFileByPath(configured2);
+        if (found2 instanceof TFile && found2.extension === "canvas") {
+          canvasFiles.push(found2);
+        } else {
+          new Notice(`Second meal plan canvas not found: ${path2}`);
+        }
       }
     }
 
-    if (!canvasFile) {
-      new Notice("Weekly meal-plan canvas not found. Set it in plugin settings or open a canvas first.");
+    if (canvasFiles.length === 0) {
+      new Notice("Meal plan canvas not found. Set it in plugin settings or open a canvas first.");
       return;
     }
 
-    const canvasText = await this.app.vault.read(canvasFile);
-    const recipeEntries = parseCanvasRecipeEntries(canvasText);
-    if (recipeEntries.length === 0) {
-      new Notice("No recipe files found on the selected canvas.");
+    const taggedEntries = [];
+    for (const canvasFile of canvasFiles) {
+      const canvasText = await this.app.vault.read(canvasFile);
+      const entries = parseCanvasRecipeEntries(canvasText);
+      for (const entry of entries) taggedEntries.push({ ...entry, sourceCanvas: canvasFile });
+    }
+
+    if (taggedEntries.length === 0) {
+      new Notice("No recipe files found on the selected canvas(es).");
       return;
     }
 
     const recipes = new Map();
-    for (const entry of recipeEntries) {
+    for (const entry of taggedEntries) {
       const rawPath = entry.rawPath;
       let file = this.app.vault.getAbstractFileByPath(normalizePath(rawPath));
       if (!(file instanceof TFile)) {
-        const linkDest = this.app.metadataCache.getFirstLinkpathDest(rawPath, canvasFile.path);
+        const linkDest = this.app.metadataCache.getFirstLinkpathDest(rawPath, entry.sourceCanvas.path);
         if (linkDest) file = linkDest;
       }
       if (!(file instanceof TFile) || file.extension !== "md") continue;
@@ -4956,12 +6116,12 @@ class WeeklyMealShopperPlugin extends Plugin {
           ")",
         ].join("");
         const result = await this.promptPositiveNumber(prompt, defaultProjectServings);
-        if (result.cancelled) return;
         if (result.error) {
           new Notice(result.error);
           return;
         }
-        projectServingsTargets.set(file.path, result.value);
+        // If cancelled, fall back to the default rather than aborting the whole list
+        projectServingsTargets.set(file.path, result.cancelled ? defaultProjectServings : result.value);
       }
 
     }
@@ -5090,7 +6250,12 @@ class WeeklyMealShopperPlugin extends Plugin {
             ? Math.ceil(item.amount)
             : item.amount;
         const override = ingredientOverrides.get(displayName);
-        const converted = convertBaseAmountToPreferredUnit(adjustedAmount, item.unit, override?.unit || "");
+        let converted = convertBaseAmountToPreferredUnit(adjustedAmount, item.unit, override?.unit || "");
+        // If still showing raw ml, humanize to weight or volume units
+        if (converted.unit === "ml") {
+          const humanized = humanizeVolumeUnit(converted.amount, "ml", displayName);
+          converted = { amount: humanized.amount, unit: humanized.unit };
+        }
         totalItems.push({
           ...item,
           name: displayName,
@@ -5188,7 +6353,7 @@ class WeeklyMealShopperPlugin extends Plugin {
       "# Weekly Shopping List",
       "",
       `Generated: ${new Date().toISOString()}`,
-      `Canvas: [[${canvasFile.path}|${canvasFile.basename}]]`,
+      `Canvas: ${canvasFiles.map((f) => `[[${f.path}|${f.basename}]]`).join(", ")}`,
       "",
       "## Planned Recipes",
       recipePlanLines.join("\n"),
@@ -5624,14 +6789,27 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     });
 
     new Setting(firstTimeSetupBody)
-      .setName("Weekly meal-plan canvas")
-      .setDesc("Canvas file used for recipe aggregation when no canvas is currently open.")
+      .setName("Meal plan canvas (primary)")
+      .setDesc("The persistent canvas used for recipe planning. Reuse this each week — edit it in place rather than creating a new one.")
       .addText((text) =>
         text
           .setPlaceholder("Utility/⛑️ Weekly Meal Plan.canvas")
           .setValue(this.plugin.settings.weeklyCanvasPath)
           .onChange(async (value) => {
             this.plugin.settings.weeklyCanvasPath = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(firstTimeSetupBody)
+      .setName("Meal plan canvas (second prep session)")
+      .setDesc("Optional. Set a second canvas if you meal prep twice a week. The shopping list will aggregate ingredients from both canvases. Leave blank to use a single canvas.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Utility/⛑️ Weekly Meal Plan 2.canvas")
+          .setValue(this.plugin.settings.weeklyCanvasPath2 || "")
+          .onChange(async (value) => {
+            this.plugin.settings.weeklyCanvasPath2 = value.trim();
             await this.plugin.saveSettings();
           })
       );
