@@ -2,9 +2,23 @@
 
 Weekly Meal Shopper standardizes recipe notes, parses ingredient metadata, creates weekly meal-prep canvases, and generates categorized shopping lists from those canvases.
 
-The plugin ships with its own private starter templates inside the plugin folder. You do not need to configure Obsidian's Templates core plugin to use the recipe note or meal-prep canvas commands.
+The plugin ships with its own starter templates. You do not need to configure Obsidian's Templates core plugin to use the recipe note or meal-prep canvas commands.
 
 Support the project: [Buy Me a Coffee](https://buymeacoffee.com/tonyhad)
+
+## Network Use, AI, and Privacy
+
+Most of the plugin works fully offline: recipe templates, canvas planning, ingredient parsing, and shopping list generation never leave your vault.
+
+The optional **recipe transcription features** use the OpenAI API:
+
+- `Transcribe recipe from URL entry (website/YouTube)` sends the page or transcript text you point it at to OpenAI to extract a structured recipe.
+- `Transcribe recipes from image folder` sends your recipe images to OpenAI for transcription.
+- `Standardize current recipe format` can call OpenAI to align recipe sections when needed.
+
+To use these features you must supply **your own OpenAI API key** in the plugin settings (an OpenAI account with API billing is required). The key is stored locally in the plugin's `data.json` inside your vault's `.obsidian` folder and is only ever sent to OpenAI's API (`api.openai.com`). If you never set a key, no network requests are made.
+
+The plugin collects no telemetry and contains no ads.
 
 ## First Start
 
@@ -59,7 +73,7 @@ Plugin-owned bundled template files:
 - `.obsidian/plugins/weekly-meal-shopper/templates/recipe-template.md`
 - `.obsidian/plugins/weekly-meal-shopper/templates/meal-prep-canvas-template.canvas`
 
-On a fresh install, these files are already present in the plugin. `Run First-Time Setup` copies them into the editable vault paths you choose, and the creation commands use those editable vault copies.
+On a fresh install these files are created automatically from built-in copies the first time they are needed. `Run First-Time Setup` copies them into the editable vault paths you choose, and the creation commands use those editable vault copies.
 
 ## 5-Minute Quick Start
 
