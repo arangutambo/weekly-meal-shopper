@@ -61,6 +61,14 @@ function loadMainContext() {
   const mainPath = path.resolve(__dirname, "..", "..", "main.js");
   const source = fs.readFileSync(mainPath, "utf8");
 
+  // Memoize the stub so the exact classes main.js imports (e.g. TFile) are the
+  // same ones tests can construct, keeping `instanceof TFile` checks working.
+  let obsidianStub = null;
+  const getObsidianStub = () => {
+    if (!obsidianStub) obsidianStub = createObsidianStub();
+    return obsidianStub;
+  };
+
   const sandbox = {
     module: { exports: {} },
     exports: {},
@@ -82,13 +90,14 @@ function loadMainContext() {
     URLSearchParams,
     HTMLElement: FakeHTMLElement,
     require: (id) => {
-      if (id === "obsidian") return createObsidianStub();
+      if (id === "obsidian") return getObsidianStub();
       throw new Error(`Unexpected module request in test harness: ${id}`);
     },
   };
 
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: mainPath });
+  sandbox.__obsidian = getObsidianStub();
   return sandbox;
 }
 

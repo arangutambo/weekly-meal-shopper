@@ -15,6 +15,16 @@ const {
 const DEFAULT_SETTINGS = {
   weeklyCanvasPath: "Utility/⛑️ Weekly Meal Plan.canvas",
   weeklyCanvasPath2: "",
+  splitShoppingListByCanvas: false,
+  // "canned" (default) leaves legumes as-is; "dried" converts canned/cooked
+  // legumes to a dried-weight + ml shopping line for cooking from scratch.
+  legumeShoppingMode: "canned",
+  legumeGramsDriedPerCan: 85, // dried grams equivalent to one ~400 g can
+  legumeCookedToDriedFactor: 0.4, // multiply a cooked/canned weight to get dried
+  driedLegumeDensityGPerMl: 0.8, // dried-legume bulk density for the storage ml readout
+  // Frozen portions older than this many days are flagged in the inventory
+  // manager. 0 disables the warning.
+  frozenStaleWarningDays: 90,
   mealPrepCanvasFolder: "Utility",
   mealPrepCanvasNameTemplate: "⛑️ Weekly Meal Plan Week {{week}} {{year}}.canvas",
   shoppingListOutputPath: "Utility/🛒 Weekly Shopping List.md",
@@ -44,10 +54,16 @@ const DEFAULT_SETTINGS = {
   mealPrepCanvasTemplateVaultPath: "Templates/Weekly Meal Shopper/Meal Prep Canvas Template.canvas",
   showRecipeUsageInShoppingList: true,
   includeOverrideLinksInShoppingList: false,
+  // Recipe card view (modal layout for planning)
+  recipeCardSideColumnRegex: "Ingredients|Nutrition",
+  recipeCardTreatH1AsFilename: false,
+  recipeCardRenderUnicodeFractions: true,
+  recipeCardSingleColumnMaxWidth: 760,
   settingsSectionState: {
     firstTimeSetupCollapsed: false,
     mealPrepSetupCollapsed: false,
     recipeSetupCollapsed: false,
+    recipeCardCollapsed: false,
     ingredientFormatCollapsed: false,
     recipeTranscriptionCollapsed: false,
     shoppingCategoriesCollapsed: false,
@@ -58,6 +74,89 @@ const DEFAULT_SETTINGS = {
 
 const RECIPE_TEMPLATE_PATH = ".obsidian/plugins/weekly-meal-shopper/templates/recipe-template.md";
 const MEAL_PREP_CANVAS_TEMPLATE_PATH = ".obsidian/plugins/weekly-meal-shopper/templates/meal-prep-canvas-template.canvas";
+
+// Community installs ship only main.js/manifest.json/styles.css, so the
+// templates/ folder is absent on a fresh install. These embedded copies are
+// written back to RECIPE_TEMPLATE_PATH / MEAL_PREP_CANVAS_TEMPLATE_PATH the
+// first time a template is needed and the file is missing.
+const BUNDLED_RECIPE_TEMPLATE_DEFAULT = `---
+tags:
+  - 🧠/🍽️/📄
+CookTime:
+PrepTime:
+Portions:
+IngredientRecipes: []
+IngredientsParsed: []
+Cost:
+RecipeRating: 3
+MealPrep: false
+WeekDay: false
+PortionsPerMeal: 1
+FrozenPortionsAvailable: 0
+UseFrozenFirst: true
+type: Recipe
+FoodType: Meal Item
+Collection: []
+Cover:
+Link:
+Day:
+Time:
+---
+### Ingredients
+-
+---
+### Directions
+1.
+---
+### Notes
+
+---
+### Nutrition
+
+---
+### Log
+\`\`\`dataview
+TASK
+WHERE icontains(text, this.file.name)
+GROUP BY file.name
+SORT file.link DESC
+\`\`\`
+---
+### Tags
+`;
+
+const BUNDLED_MEAL_PREP_CANVAS_TEMPLATE_DEFAULT = `{
+\t"nodes":[
+\t\t{"id":"f90910c7a21fac32","type":"group","x":-640,"y":1800,"width":1830,"height":1960,"color":"5","label":"Projects"},
+\t\t{"id":"9a70bf7a29cb915b","type":"group","x":1440,"y":1800,"width":1830,"height":1960,"color":"5","label":"Hosting"},
+\t\t{"id":"0e4747ead5e72efb","type":"group","x":-960,"y":332,"width":4080,"height":308,"color":"4","label":"Dinner"},
+\t\t{"id":"4edb456dd460d215","type":"group","x":-960,"y":720,"width":4080,"height":308,"color":"4","label":"Snack"},
+\t\t{"id":"706a87e8d39193fd","type":"group","x":-960,"y":1180,"width":4080,"height":308,"color":"4","label":"Sweet"},
+\t\t{"id":"8d9837dc8c89db79","type":"group","x":-960,"y":-480,"width":4080,"height":308,"color":"4","label":"Breakfast"},
+\t\t{"id":"d0106717ed13c72d","type":"group","x":-960,"y":-74,"width":4080,"height":308,"color":"4","label":"Lunch"},
+\t\t{"id":"1fe6a5460b2c2d9c","type":"group","x":940,"y":-508,"width":500,"height":2068,"color":"5","label":"Tuesday"},
+\t\t{"id":"740e4f0faf2d822d","type":"group","x":1520,"y":-508,"width":480,"height":2068,"color":"5","label":"Wednesday"},
+\t\t{"id":"bbfa0bcca3eac649","type":"group","x":2080,"y":-508,"width":480,"height":2068,"color":"5","label":"Thursday"},
+\t\t{"id":"edfbe0316507be62","type":"group","x":-640,"y":-508,"width":480,"height":2068,"color":"5","label":"Saturday"},
+\t\t{"id":"87dc9d1c686ac86b","type":"group","x":2640,"y":-508,"width":480,"height":2068,"color":"5","label":"Friday"},
+\t\t{"id":"c8f5f4efc8049602","type":"group","x":-100,"y":-508,"width":460,"height":2068,"color":"5","label":"Sunday"},
+\t\t{"id":"7d48176f6ea25397","type":"group","x":440,"y":-508,"width":440,"height":2068,"color":"5","label":"Monday"}
+\t],
+\t"edges":[],
+\t"metadata":{
+\t\t"version":"1.0-1.0",
+\t\t"frontmatter":{},
+\t\t"startNode":"8f08d5322459761d"
+\t}
+}
+`;
+
+function getBundledTemplateDefault(templatePath) {
+  const normalized = String(templatePath || "").trim();
+  if (normalized === RECIPE_TEMPLATE_PATH) return BUNDLED_RECIPE_TEMPLATE_DEFAULT;
+  if (normalized === MEAL_PREP_CANVAS_TEMPLATE_PATH) return BUNDLED_MEAL_PREP_CANVAS_TEMPLATE_DEFAULT;
+  return null;
+}
 
 function getIsoWeekInfo(inputDate = new Date()) {
   const date = new Date(inputDate);
@@ -313,6 +412,15 @@ const DEFAULT_UNIT_ALIAS_CONFIG = {
   tsp: [],
 };
 
+// Volume-unit aliases that are always recognized, independent of the user's
+// unit-aliases.json. Single source of truth for both unit-map construction and
+// the settings "Unit aliases" summary.
+const BUILTIN_VOLUME_UNIT_ALIASES = {
+  cup: ["cup", "cups"],
+  tbsp: ["tbsp", "tbs", "tablespoon", "tablespoons"],
+  tsp: ["tsp", "teaspoon", "teaspoons"],
+};
+
 function resolveMeasurementProfile(settings) {
   const presetKey = String(settings?.measurementPreset || "vault_standard").trim().toLowerCase();
   const preset = MEASUREMENT_PRESETS[presetKey] || MEASUREMENT_PRESETS.vault_standard;
@@ -362,9 +470,9 @@ function buildUnitMapFromProfile(profile) {
     }
   };
 
-  addAliases(["cup", "cups", profile.labels.cup], cupSpec);
-  addAliases(["tbsp", "tbs", "tablespoon", "tablespoons", profile.labels.tbsp], tbspSpec);
-  addAliases(["tsp", "teaspoon", "teaspoons", profile.labels.tsp], tspSpec);
+  addAliases([...BUILTIN_VOLUME_UNIT_ALIASES.cup, profile.labels.cup], cupSpec);
+  addAliases([...BUILTIN_VOLUME_UNIT_ALIASES.tbsp, profile.labels.tbsp], tbspSpec);
+  addAliases([...BUILTIN_VOLUME_UNIT_ALIASES.tsp, profile.labels.tsp], tspSpec);
   addAliases(ACTIVE_EXTRA_UNIT_ALIASES.cup, cupSpec);
   addAliases(ACTIVE_EXTRA_UNIT_ALIASES.tbsp, tbspSpec);
   addAliases(ACTIVE_EXTRA_UNIT_ALIASES.tsp, tspSpec);
@@ -389,6 +497,32 @@ const DEFAULT_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE = "{{Amount}} {{Unit}} {{I
 let ACTIVE_INGREDIENT_STORAGE_SEPARATOR = DEFAULT_INGREDIENT_STORAGE_SEPARATOR;
 let ACTIVE_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE = DEFAULT_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE;
 
+// Tunable conversion factors for the dried-legume mode. Defaults here; each is
+// overridable via the matching setting (legumeGramsDriedPerCan /
+// legumeCookedToDriedFactor / driedLegumeDensityGPerMl).
+const LEGUME_GRAMS_DRIED_PER_CAN = 85; // a 400 g can drained ≈ 85 g dried
+const LEGUME_COOKED_TO_DRIED_FACTOR = 0.4; // cooked/canned weight × 0.4 ≈ dried weight
+const DRIED_LEGUME_DENSITY_G_PER_ML = 0.8; // bulk density for the storage-volume readout
+
+function positiveNumberOr(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+// Accepts either raw settings (legume* keys) or short opts (gramsDriedPerCan …)
+// and returns the resolved factor object used by the legume conversion.
+function resolveLegumeFactors(source = {}) {
+  const src = source || {};
+  return {
+    gramsDriedPerCan: positiveNumberOr(src.legumeGramsDriedPerCan ?? src.gramsDriedPerCan, LEGUME_GRAMS_DRIED_PER_CAN),
+    cookedToDriedFactor: positiveNumberOr(src.legumeCookedToDriedFactor ?? src.cookedToDriedFactor, LEGUME_COOKED_TO_DRIED_FACTOR),
+    densityGPerMl: positiveNumberOr(src.driedLegumeDensityGPerMl ?? src.densityGPerMl, DRIED_LEGUME_DENSITY_G_PER_ML),
+  };
+}
+
+let ACTIVE_LEGUME_SHOPPING_MODE = "canned";
+let ACTIVE_LEGUME_FACTORS = resolveLegumeFactors();
+
 function normalizeMeasurementPreference(value) {
   const pref = normalizeSearchText(value);
   if (pref === "volume") return "volume";
@@ -406,6 +540,8 @@ function setActiveMeasurementProfile(settings) {
   ACTIVE_UNIT_MAP = buildUnitMapFromProfile(ACTIVE_MEASUREMENT_PROFILE);
   ACTIVE_MEASUREMENT_PREFERENCE = normalizeMeasurementPreference(settings?.measurementPreference);
   ACTIVE_CONVERT_LIQUID_VOLUME_TO_WEIGHT = settings?.convertLiquidVolumeMeasuresToWeight !== false;
+  ACTIVE_LEGUME_SHOPPING_MODE = settings?.legumeShoppingMode === "dried" ? "dried" : "canned";
+  ACTIVE_LEGUME_FACTORS = resolveLegumeFactors(settings || {});
 }
 
 function normalizeUnitAliasConfig(raw) {
@@ -420,6 +556,21 @@ function normalizeUnitAliasConfig(raw) {
     tbsp: normalizeList(src.tbsp),
     tsp: normalizeList(src.tsp),
   };
+}
+
+// Produces a display-friendly view of the active unit aliases for the settings
+// tab: built-in aliases plus any custom aliases from unit-aliases.json (with
+// custom entries that merely repeat a built-in filtered out).
+function buildUnitAliasSummary(extraAliases = ACTIVE_EXTRA_UNIT_ALIASES) {
+  const extra = normalizeUnitAliasConfig(extraAliases);
+  return Object.keys(BUILTIN_VOLUME_UNIT_ALIASES).map((unit) => {
+    const builtIn = [...BUILTIN_VOLUME_UNIT_ALIASES[unit]];
+    const builtInSet = new Set(builtIn.map((alias) => normalizeSearchText(alias)));
+    const custom = (extra[unit] || []).filter(
+      (alias) => !builtInSet.has(normalizeSearchText(alias))
+    );
+    return { unit, builtIn, custom };
+  });
 }
 
 function normalizeIngredientStorageSeparator(separator) {
@@ -633,6 +784,30 @@ const HERB_BUNCH_INGREDIENTS = new Set([
   "swiss chard",
 ]);
 
+// Culinary herbs that are sold in both fresh and dried forms. Used to route
+// "dried <herb>" to the spice section and "fresh <herb>" to fresh produce,
+// regardless of whether a per-herb rule exists. Deliberately excludes leafy
+// greens (spinach, kale, …) that only come fresh.
+const CULINARY_HERBS = new Set([
+  "basil",
+  "oregano",
+  "thyme",
+  "rosemary",
+  "sage",
+  "parsley",
+  "coriander",
+  "cilantro",
+  "mint",
+  "dill",
+  "chive",
+  "tarragon",
+  "marjoram",
+  "chervil",
+  "bay leaf",
+  "bay leaves",
+  "lemongrass",
+]);
+
 // How many ml of a herb corresponds to one "bunch" for shopping purposes.
 // 1 bunch of most fresh herbs yields roughly 1 cup (250ml) usable leaves.
 const HERB_BUNCH_ML = 250;
@@ -653,9 +828,89 @@ const DEFAULT_INGREDIENT_CATEGORY_CONFIG = {
   categoryOrder: SHOPPING_CATEGORY_ORDER,
   defaultCategory: "Other",
   exact: {
+    // General herbs
     "fresh herbs": "Fresh Fruit and Vegetables",
+    // Specific fresh herbs (override contains spice rules below)
+    "fresh thyme": "Fresh Fruit and Vegetables",
+    "fresh rosemary": "Fresh Fruit and Vegetables",
+    "fresh basil": "Fresh Fruit and Vegetables",
+    "fresh sage": "Fresh Fruit and Vegetables",
+    "fresh dill": "Fresh Fruit and Vegetables",
+    "fresh mint": "Fresh Fruit and Vegetables",
+    "fresh chives": "Fresh Fruit and Vegetables",
+    "fresh coriander": "Fresh Fruit and Vegetables",
+    // Specific dried herbs (override contains fresh rules below)
+    "dried thyme": "Spices and Seasoning",
+    "dried rosemary": "Spices and Seasoning",
+    "dried basil": "Spices and Seasoning",
+    "dried sage": "Spices and Seasoning",
+    "dried dill": "Spices and Seasoning",
+    "dried mint": "Spices and Seasoning",
+    "dried chives": "Spices and Seasoning",
+    // Specific spices from coriander seeds context
+    "coriander seeds": "Spices and Seasoning",
+    "ground coriander": "Spices and Seasoning",
+    "coriander powder": "Spices and Seasoning",
+    // Produce exact entries
+    "head radicchio": "Fresh Fruit and Vegetables",
+    "radicchio head": "Fresh Fruit and Vegetables",
+    "serrano pepper": "Fresh Fruit and Vegetables",
+    "fennel bulb": "Fresh Fruit and Vegetables",
+    "baby arugula": "Fresh Fruit and Vegetables",
+    "sweet corn": "Fresh Fruit and Vegetables",
+    "sweetcorn": "Fresh Fruit and Vegetables",
+    // Bug-fix: "eggplant" and "aubergine" contain "egg" → Protein without this
+    "eggplant": "Fresh Fruit and Vegetables",
+    "aubergine": "Fresh Fruit and Vegetables",
+    "courgette": "Fresh Fruit and Vegetables",
+    // Bug-fix: "fish sauce" contains "fish" → Protein without this
+    "fish sauce": "Pantry Staples",
+    // Specific spice entries
+    "chipotle chile flakes": "Spices and Seasoning",
+    // Pantry exact entries
+    "almonds": "Pantry Staples",
+    "cashews": "Pantry Staples",
+    "cocoa nibs": "Pantry Staples",
+    "cornstarch": "Pantry Staples",
+    "cornflour": "Pantry Staples",
+    "corn flour": "Pantry Staples",
+    "corn starch": "Pantry Staples",
+    "capers": "Pantry Staples",
+    "artichoke hearts": "Pantry Staples",
+    "canned corn": "Pantry Staples",
+    "baking soda": "Pantry Staples",
+    "bicarbonate of soda": "Pantry Staples",
+    "bicarbonate": "Pantry Staples",
+    "dried apricots": "Pantry Staples",
+    "dried apricot": "Pantry Staples",
+    "dried dates": "Pantry Staples",
+    "dried figs": "Pantry Staples",
+    "dried cranberries": "Pantry Staples",
+    // Frozen exact
+    "green peas": "Frozen",
+    // Cheese exact
+    "mascarpone": "Cheese",
+    "burrata": "Cheese",
+    // Dairy exact
+    "creme fraiche": "Dairy and Refrigerated",
+    // Bakery exact
+    "naan bread": "Bakery",
+    "pita bread": "Bakery",
+    "sourdough bread": "Bakery",
+    "sourdough loaf": "Bakery",
+    // Produce misc
+    "shallots": "Fresh Fruit and Vegetables",
+    "apricot": "Fresh Fruit and Vegetables",
+    "fig": "Fresh Fruit and Vegetables",
+    "pear": "Fresh Fruit and Vegetables",
+    "peach": "Fresh Fruit and Vegetables",
+    "plum": "Fresh Fruit and Vegetables",
+    "strawberry": "Fresh Fruit and Vegetables",
+    "raspberry": "Fresh Fruit and Vegetables",
+    "grape": "Fresh Fruit and Vegetables",
   },
   contains: {
+    // ── Cheese ───────────────────────────────────────────────────────────────
     parmesan: "Cheese",
     mozzarella: "Cheese",
     feta: "Cheese",
@@ -667,8 +922,10 @@ const DEFAULT_INGREDIENT_CATEGORY_CONFIG = {
     pecorino: "Cheese",
     cheese: "Cheese",
 
+    // ── Frozen ───────────────────────────────────────────────────────────────
     frozen: "Frozen",
 
+    // ── Spices and Seasoning ─────────────────────────────────────────────────
     salt: "Spices and Seasoning",
     pepper: "Spices and Seasoning",
     oregano: "Spices and Seasoning",
@@ -693,26 +950,29 @@ const DEFAULT_INGREDIENT_CATEGORY_CONFIG = {
     "dried flakes": "Spices and Seasoning",
     saffron: "Spices and Seasoning",
     "star anise": "Spices and Seasoning",
-    "anise": "Spices and Seasoning",
+    anise: "Spices and Seasoning",
     cardamom: "Spices and Seasoning",
     "five spice": "Spices and Seasoning",
     "five-spice": "Spices and Seasoning",
-    "ground coriander": "Spices and Seasoning",
-    "coriander powder": "Spices and Seasoning",
+    "chinese five": "Spices and Seasoning",
     allspice: "Spices and Seasoning",
     cloves: "Spices and Seasoning",
     nutmeg: "Spices and Seasoning",
     "fennel seed": "Spices and Seasoning",
     "fennel seeds": "Spices and Seasoning",
-    "szechuan": "Spices and Seasoning",
-    "sichuan": "Spices and Seasoning",
+    szechuan: "Spices and Seasoning",
+    sichuan: "Spices and Seasoning",
     sumac: "Spices and Seasoning",
     "za atar": "Spices and Seasoning",
     harissa: "Spices and Seasoning",
     "ras el hanout": "Spices and Seasoning",
     dukkah: "Spices and Seasoning",
-    "chinese five": "Spices and Seasoning",
+    // Bare herb names → Spices (dried is the common shopping form for these)
+    thyme: "Spices and Seasoning",
+    rosemary: "Spices and Seasoning",
+    sage: "Spices and Seasoning",
 
+    // ── Fresh Fruit and Vegetables ────────────────────────────────────────────
     avocado: "Fresh Fruit and Vegetables",
     apple: "Fresh Fruit and Vegetables",
     banana: "Fresh Fruit and Vegetables",
@@ -746,30 +1006,71 @@ const DEFAULT_INGREDIENT_CATEGORY_CONFIG = {
     chili: "Fresh Fruit and Vegetables",
     lemongrass: "Fresh Fruit and Vegetables",
     squash: "Fresh Fruit and Vegetables",
+    zucchini: "Fresh Fruit and Vegetables",
+    asparagus: "Fresh Fruit and Vegetables",
+    spinach: "Fresh Fruit and Vegetables",
+    beet: "Fresh Fruit and Vegetables",
+    corn: "Fresh Fruit and Vegetables",
+    arugula: "Fresh Fruit and Vegetables",
+    rocket: "Fresh Fruit and Vegetables",
+    "bok choy": "Fresh Fruit and Vegetables",
+    leek: "Fresh Fruit and Vegetables",
+    pumpkin: "Fresh Fruit and Vegetables",
+    silverbeet: "Fresh Fruit and Vegetables",
+    // Fresh herbs (commonly bought as living plants or bunches)
+    basil: "Fresh Fruit and Vegetables",
+    dill: "Fresh Fruit and Vegetables",
+    chive: "Fresh Fruit and Vegetables",
+    mint: "Fresh Fruit and Vegetables",
 
+    // ── Dairy and Refrigerated ────────────────────────────────────────────────
     milk: "Dairy and Refrigerated",
     yogurt: "Dairy and Refrigerated",
     cream: "Dairy and Refrigerated",
     butter: "Dairy and Refrigerated",
     "ice cream": "Dairy and Refrigerated",
+    "sour cream": "Dairy and Refrigerated",
+    kefir: "Dairy and Refrigerated",
 
+    // ── Bakery ────────────────────────────────────────────────────────────────
     bread: "Bakery",
     bagel: "Bakery",
     wrap: "Bakery",
     tortilla: "Bakery",
     bun: "Bakery",
+    naan: "Bakery",
+    sourdough: "Bakery",
 
+    // ── Protein ───────────────────────────────────────────────────────────────
     tofu: "Protein",
     tempeh: "Protein",
     chorizo: "Protein",
     chicken: "Protein",
     beef: "Protein",
     pork: "Protein",
-    fish: "Protein",
     salmon: "Protein",
+    lamb: "Protein",
+    tuna: "Protein",
+    anchov: "Protein",
+    prawn: "Protein",
+    shrimp: "Protein",
+    scallop: "Protein",
+    squid: "Protein",
+    mussel: "Protein",
+    crab: "Protein",
+    lobster: "Protein",
+    sardine: "Protein",
+    bacon: "Protein",
+    pancetta: "Protein",
+    prosciutto: "Protein",
+    salami: "Protein",
+    sausage: "Protein",
+    mince: "Protein",
+    fish: "Protein",
     egg: "Protein",
     protein: "Protein",
 
+    // ── Pantry Staples ────────────────────────────────────────────────────────
     pasta: "Pantry Staples",
     spaghetti: "Pantry Staples",
     rice: "Pantry Staples",
@@ -805,6 +1106,24 @@ const DEFAULT_INGREDIENT_CATEGORY_CONFIG = {
     popcorn: "Pantry Staples",
     breadcrumbs: "Pantry Staples",
     coconut: "Pantry Staples",
+    miso: "Pantry Staples",
+    honey: "Pantry Staples",
+    agave: "Pantry Staples",
+    vanilla: "Pantry Staples",
+    yeast: "Pantry Staples",
+    caper: "Pantry Staples",
+    olive: "Pantry Staples",
+    raisin: "Pantry Staples",
+    currant: "Pantry Staples",
+    noodle: "Pantry Staples",
+    couscous: "Pantry Staples",
+    polenta: "Pantry Staples",
+    cracker: "Pantry Staples",
+    chip: "Pantry Staples",
+    chocolate: "Pantry Staples",
+    cocoa: "Pantry Staples",
+    jam: "Pantry Staples",
+    paste: "Pantry Staples",
   },
 };
 
@@ -846,8 +1165,23 @@ function cloneDefaultCategoryConfig() {
   return JSON.parse(JSON.stringify(DEFAULT_INGREDIENT_CATEGORY_CONFIG));
 }
 
+function normalizeRuleMap(map) {
+  const out = {};
+  for (const [k, v] of Object.entries(map || {})) {
+    const key = normalizeSearchText(k);
+    const category = String(v || "").trim();
+    if (key && category) out[key] = category;
+  }
+  return out;
+}
+
 function normalizeCategoryConfig(raw) {
   const base = cloneDefaultCategoryConfig();
+  // Normalize the default rule keys up front so matching (which runs against
+  // normalizeSearchText'd ingredient names) behaves identically whether or not
+  // the user supplies overrides.
+  base.exact = normalizeRuleMap(base.exact);
+  base.contains = normalizeRuleMap(base.contains);
   if (!raw || typeof raw !== "object") return base;
 
   if (Array.isArray(raw.categoryOrder)) {
@@ -859,36 +1193,76 @@ function normalizeCategoryConfig(raw) {
     base.defaultCategory = raw.defaultCategory.trim();
   }
 
+  // Exact and contains maps from the JSON file are layered ON TOP of the
+  // bundled defaults rather than replacing them, so customised configs still
+  // pick up rules added in later plugin updates. The JSON layer wins on any
+  // key conflict.
   if (raw.exact && typeof raw.exact === "object") {
-    base.exact = {};
-    for (const [k, v] of Object.entries(raw.exact)) {
-      const key = normalizeSearchText(k);
-      const category = String(v || "").trim();
-      if (key && category) base.exact[key] = category;
-    }
+    // Order is irrelevant for exact lookups; user rules override on conflict.
+    base.exact = { ...base.exact, ...normalizeRuleMap(raw.exact) };
   }
 
   if (raw.contains && typeof raw.contains === "object") {
-    base.contains = {};
-    for (const [k, v] of Object.entries(raw.contains)) {
-      const key = normalizeSearchText(k);
-      const category = String(v || "").trim();
-      if (key && category) base.contains[key] = category;
+    // User rules go first so they take matching precedence (contains rules are
+    // evaluated in insertion order and the first match wins) and override
+    // default values on key conflict; default-only rules are then appended.
+    const merged = normalizeRuleMap(raw.contains);
+    for (const [key, category] of Object.entries(base.contains)) {
+      if (!(key in merged)) merged[key] = category;
     }
+    base.contains = merged;
   }
 
   return base;
 }
 
-function classifyIngredientCategory(name, config) {
-  const text = normalizeSearchText(name);
-  const c = normalizeCategoryConfig(config);
-
-  if (text && c.exact[text]) return c.exact[text];
-  for (const [pattern, category] of Object.entries(c.contains)) {
-    if (text.includes(pattern)) return category;
+// Finds the configured category whose name matches one of the candidates,
+// returning "" when none exist (e.g. the user renamed their categories) so the
+// caller can fall back to normal rule matching instead of inventing a category.
+function resolveConfigCategory(config, candidates) {
+  const order = Array.isArray(config?.categoryOrder) ? config.categoryOrder : [];
+  for (const candidate of candidates) {
+    const match = order.find((cat) => normalizeSearchText(cat) === normalizeSearchText(candidate));
+    if (match) return match;
   }
-  return c.defaultCategory || "Other";
+  return "";
+}
+
+const DRIED_HERB_CATEGORY_CANDIDATES = ["Spices and Seasoning", "Herbs, Spices and Seasonings", "Spices"];
+const FRESH_HERB_CATEGORY_CANDIDATES = ["Fresh Fruit and Vegetables", "Fresh Fruit and Veg", "Produce"];
+
+// "dried <herb>" is a pantry spice; "fresh <herb>" is fresh produce. This rule
+// generalizes that split to every culinary herb so we don't need a per-herb
+// exact rule. Returns null when the name has no fresh/dried qualifier, isn't a
+// herb, or the target category doesn't exist in the user's config.
+function classifyFreshOrDriedHerb(text, config) {
+  const normalized = normalizeSearchText(text);
+  if (!normalized) return null;
+  const isDried = /\bdried\b/.test(normalized);
+  const isFresh = /\bfresh\b/.test(normalized);
+  if (!isDried && !isFresh) return null;
+
+  let herb = "";
+  for (const candidate of CULINARY_HERBS) {
+    if (normalized.includes(candidate)) {
+      herb = candidate;
+      break;
+    }
+  }
+  if (!herb) return null;
+
+  if (isDried) {
+    const category = resolveConfigCategory(config, DRIED_HERB_CATEGORY_CANDIDATES);
+    if (category) return { category, reason: `dried herb: "${herb}"` };
+  } else if (isFresh) {
+    const category = resolveConfigCategory(config, FRESH_HERB_CATEGORY_CANDIDATES);
+    if (category) return { category, reason: `fresh herb: "${herb}"` };
+  }
+  return null;
+}
+
+function classifyIngredientCategory(name, config) {
+  return classifyIngredientCategoryWithReason(name, config).category;
 }
 
 function classifyIngredientCategoryWithReason(name, config) {
@@ -897,12 +1271,110 @@ function classifyIngredientCategoryWithReason(name, config) {
   if (text && c.exact[text]) {
     return { category: c.exact[text], reason: `exact match: "${text}"` };
   }
+  // Fresh/dried herb routing takes precedence over the broad contains rules so
+  // that, e.g., "fresh oregano" reaches produce instead of the "oregano" spice rule.
+  const herbRule = classifyFreshOrDriedHerb(text, c);
+  if (herbRule) return herbRule;
   for (const [pattern, category] of Object.entries(c.contains)) {
     if (text.includes(pattern)) {
       return { category, reason: `contains rule: "${pattern}"` };
     }
   }
   return { category: c.defaultCategory || "Other", reason: "default category" };
+}
+
+// Data-quality lint for a single recipe. Pure given the recipe's raw ingredient
+// lines, its Portions value, and the category config. Returns a list of
+// findings ({ severity, type, message }) used by the "Validate recipes" command.
+function validateRecipeData({ ingredientLines = [], portions = null, categoryConfig } = {}) {
+  const findings = [];
+  const config = normalizeCategoryConfig(categoryConfig);
+  const defaultCategory = config.defaultCategory || "Other";
+
+  const portionsNum = parseNumberLike(portions, NaN);
+  if (!Number.isFinite(portionsNum) || portionsNum <= 0) {
+    findings.push({
+      severity: "warning",
+      type: "portions",
+      message: "Missing or invalid Portions frontmatter (batch scaling assumes 1).",
+    });
+  }
+
+  let nonStructured = 0;
+  const lines = Array.isArray(ingredientLines) ? ingredientLines : [];
+  for (const rawLine of lines) {
+    const line = String(rawLine || "");
+    const trimmed = line.replace(/^[-*+]\s+/, "").trim();
+    if (!trimmed) continue;
+    if (looksLikeIngredientSubheadingLine(trimmed)) continue;
+
+    const parsed = parseIngredientLine(line);
+    if (!parsed) {
+      // Ignore blank / separator-only placeholder rows (e.g. "; ; ;").
+      if (!/[a-z0-9]/i.test(trimmed)) continue;
+      findings.push({ severity: "error", type: "unparsed", message: `Could not parse ingredient line: "${trimmed}"` });
+      continue;
+    }
+    if (!parsed.isStructured) nonStructured += 1;
+    if (!parsed.quantityUnknown && !Number.isFinite(parsed.amountMetric)) {
+      findings.push({ severity: "error", type: "amount", message: `Amount did not resolve to a number: "${trimmed}"` });
+    }
+    const displayName = normalizeShoppingDisplayName(stripPreparationPhrases(parsed.name));
+    const classified = classifyIngredientCategoryWithReason(displayName, config);
+    if (classified.category === defaultCategory) {
+      findings.push({
+        severity: "info",
+        type: "uncategorized",
+        message: `"${displayName}" has no category rule (lands in ${defaultCategory}).`,
+      });
+    }
+  }
+
+  if (nonStructured > 0) {
+    findings.push({
+      severity: "info",
+      type: "legacy-format",
+      message: `${nonStructured} ingredient line(s) are not in 4-slot format.`,
+    });
+  }
+
+  return findings;
+}
+
+const VALIDATION_SEVERITY_ICONS = { error: "❌", warning: "⚠️", info: "ℹ️" };
+const VALIDATION_SEVERITY_ORDER = { error: 0, warning: 1, info: 2 };
+
+// Renders the per-recipe findings into a markdown report note.
+function buildRecipeValidationReport(recipeReports, totalRecipes = 0) {
+  const reports = Array.isArray(recipeReports) ? recipeReports : [];
+  const withFindings = reports.filter((r) => r && Array.isArray(r.findings) && r.findings.length > 0);
+  const lines = [
+    "# Recipe Validation Report",
+    "",
+    `Generated: ${new Date().toISOString()}`,
+    `Scanned ${totalRecipes} recipe(s); ${withFindings.length} with findings.`,
+    "",
+  ];
+
+  if (withFindings.length === 0) {
+    lines.push("✅ No issues found.");
+    return lines.join("\n");
+  }
+
+  for (const report of withFindings) {
+    const name = String(report.name || "Untitled recipe");
+    lines.push(`## ${report.link || name}`);
+    const sorted = [...report.findings].sort(
+      (a, b) => (VALIDATION_SEVERITY_ORDER[a.severity] ?? 9) - (VALIDATION_SEVERITY_ORDER[b.severity] ?? 9)
+    );
+    for (const finding of sorted) {
+      const icon = VALIDATION_SEVERITY_ICONS[finding.severity] || "•";
+      lines.push(`- ${icon} ${finding.message}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n").trimEnd() + "\n";
 }
 
 function parseAmountToken(token) {
@@ -921,12 +1393,17 @@ function parseAmountToken(token) {
 
 function parseAmountFromStart(text) {
   const compact = text.replace(/^\s+/, "");
-  const range = compact.match(/^([^\s]+)\s*(?:to|-|–)\s*([^\s]+)/i);
+  const range = compact.match(/^([^\s]+)\s*(?:to|-|–|—)\s*([^\s]+)/i);
   if (range) {
     const first = parseAmountToken(range[1]);
-    if (first !== null) {
+    const second = parseAmountToken(range[2]);
+    // Only treat this as a quantity range when BOTH ends are numbers. This
+    // avoids matching the "to" inside words like "tomatoes" (e.g. "2 tomatoes"),
+    // which previously consumed the whole token and dropped the ingredient name.
+    if (first !== null && second !== null) {
       const consumed = range[0].length;
-      return { amount: first, rest: compact.slice(consumed).trim() };
+      // Represent a range by its midpoint, e.g. "1-2 tbsp" -> 1.5.
+      return { amount: (first + second) / 2, rest: compact.slice(consumed).trim() };
     }
   }
 
@@ -1002,11 +1479,20 @@ function normalizeLegacyIngredientText(text) {
   let source = normalizeSingleLineText(text).replace(/[–—]/g, "-");
   if (!source) return "";
 
+  // Collapse multiplier phrasings like "2 × 400g" / "2 x 400g" into a plain
+  // "2 400g" so the container rules below can pick up count + pack size. Guarded
+  // by digits on both sides so we never touch an "x" inside an ingredient word.
+  source = source.replace(/(\d)\s*[×x]\s*(?=\d)/gi, "$1 ");
+
   source = source.replace(/^zest\s+and\s+juice\s+of\s+(.+)$/i, (_match, target) => `${target}, zested and juiced`);
   source = source.replace(/^juice\s+of\s+(.+)$/i, (_match, target) => `${target}, juiced`);
   source = source.replace(/^zest\s+of\s+(.+)$/i, (_match, target) => `${target}, zested`);
-  source = source.replace(/^handful\s+of\s+(.+)$/i, (_match, target) => `1 handful ${target}`);
-  source = source.replace(/^pinch\s+of\s+(.+)$/i, (_match, target) => `1 pinch ${target}`);
+  // Vague hand-measure phrasings, with or without a leading article, become a
+  // count of that measure: "a handful of spinach" -> "1 handful spinach".
+  source = source.replace(
+    /^(?:(?:a|an)\s+)?(handful|pinch|dash|splash|knob|drizzle|sprinkle)\s+of\s+(.+)$/i,
+    (_match, measure, target) => `1 ${measure} ${target}`
+  );
   source = source.replace(
     /^(\d+(?:\.\d+)?)\s*cm\s+piece(?:s)?\s+of\s+(.+)$/i,
     (_match, size, target) => `1 piece ${target}, ${size} cm`
@@ -1130,7 +1616,22 @@ function formatRecipeViewIngredientDisplay(
   });
   let displayAmount = fields.amount;
   let displayUnit = fields.unit;
-  if (displayUnit === "ml" && parsed?.amountMetric > 0) {
+  let displayIngredient = fields.ingredient;
+
+  // Dried-legume mode: show legumes in the recipe view as a dried gram weight
+  // (grams only — no storage ml, which is shopping-list-specific).
+  let legumeDried = null;
+  if (ACTIVE_LEGUME_SHOPPING_MODE === "dried") {
+    legumeDried = computeLegumeDried(
+      { name: parsed?.name, unit: parsed?.unitMetric, amount: parsed?.amountMetric, quantityUnknown: parsed?.quantityUnknown },
+      ACTIVE_LEGUME_FACTORS
+    );
+  }
+
+  if (legumeDried) {
+    displayAmount = String(legumeDried.grams);
+    displayUnit = "g";
+  } else if (displayUnit === "ml" && parsed?.amountMetric > 0) {
     const humanized = humanizeVolumeUnit(parsed.amountMetric, "ml", parsed.name || "");
     displayAmount = String(humanized.amount);
     displayUnit = humanized.unit;
@@ -1138,7 +1639,7 @@ function formatRecipeViewIngredientDisplay(
   const replacements = {
     amount: displayAmount,
     unit: displayUnit,
-    ingredient: fields.ingredient,
+    ingredient: displayIngredient,
     preparation: fields.preparation,
     preparationsuffix: fields.preparationSuffix,
   };
@@ -1612,7 +2113,9 @@ function parseIngredientOverrideHref(href) {
   return cleanIngredientName(decodeURIComponent(params.get("ingredient") || ""));
 }
 
-function buildShoppingRecipeUsageLine(recipes) {
+// Builds the recipe-usage suffix appended inline to a shopping item:
+// " - [[Recipe 1]] - [[Recipe 2]]". Returns "" when there are no recipes.
+function buildShoppingRecipeUsageSuffix(recipes) {
   const values = recipes && typeof recipes[Symbol.iterator] === "function"
     ? [...recipes]
     : [];
@@ -1627,7 +2130,7 @@ function buildShoppingRecipeUsageLine(recipes) {
       }
       return `[[${basename}]]`;
     });
-  return `    - ${links.join(", ")}`;
+  return ` - ${links.join(" - ")}`;
 }
 
 function formatShoppingListItemLines(
@@ -1645,6 +2148,7 @@ function formatShoppingListItemLines(
     ? ` [Override](${buildIngredientOverrideHref(overrideIngredient)})`
     : "";
 
+  const amountLabel = formatShoppingItemAmountLabel(item);
   let mainLine = "";
   if (noAmountCategory || item.quantityUnknown) {
     mainLine = `  - [ ] ${item.name}${overrideSuffix}`;
@@ -1653,15 +2157,311 @@ function formatShoppingListItemLines(
     const displayName = pluralizeSimple(singularizeSimple(item.name), roundedAmount);
     mainLine = `  - [ ] (${formatMetricAmount(roundedAmount)}) ${displayName}${overrideSuffix}`;
   } else {
-    mainLine = `  - [ ] (${formatMetricAmount(item.amount)} ${item.unit}) ${item.name}${overrideSuffix}`;
+    mainLine = `  - [ ] (${amountLabel}) ${item.name}${overrideSuffix}`;
   }
 
-  const lines = [mainLine];
+  // Recipe links are appended inline to the ingredient line rather than on a
+  // separate indented sub-bullet: "… ingredient - [[Recipe 1]] - [[Recipe 2]]".
   if (includeRecipeUsage) {
-    const usageLine = buildShoppingRecipeUsageLine(item.recipes);
-    if (usageLine) lines.push(usageLine);
+    mainLine += buildShoppingRecipeUsageSuffix(item.recipes);
   }
-  return lines;
+  return [mainLine];
+}
+
+// Amount label for a measured (non-unit) shopping item. Most items render as
+// "<amount> <unit>"; legume items in dried mode also carry a secondary volume
+// for eyeballing storage, rendered as "<g> g / <ml> ml".
+function formatShoppingItemAmountLabel(item) {
+  const primary = `${formatMetricAmount(item.amount)} ${item.unit}`;
+  if (item && item.secondaryAmount != null && item.secondaryUnit) {
+    return `${primary} / ${formatMetricAmount(item.secondaryAmount)} ${item.secondaryUnit}`;
+  }
+  return primary;
+}
+
+// Spice/seasoning amounts below these thresholds read as a pinch and add noise
+// to the shopping list, so we hide the amount. Anything larger (e.g. a 100 g
+// bag of saffron) is a real purchase quantity and should be shown.
+const SPICE_AMOUNT_DISPLAY_MAX_GRAMS = 15;
+const SPICE_AMOUNT_DISPLAY_MAX_ML = 15; // ~3 tsp at 5 ml/tsp
+
+// Best-effort ml equivalent for the volume units a shopping item can carry
+// after humanization. Returns null for units we can't convert (discrete or
+// weight units), which callers treat as "not a small volume".
+function estimateMlEquivalentForUnit(amount, unit, profile = ACTIVE_MEASUREMENT_PROFILE) {
+  const value = Number(amount || 0);
+  if (!Number.isFinite(value)) return null;
+  const cupMl = Number(profile?.cupMl) || 250;
+  const tbspMl = Number(profile?.tbspMl) || 15;
+  const tspMl = Number(profile?.tspMl) || 5;
+  switch (String(unit || "")) {
+    case "ml":
+      return value;
+    case "tsp":
+      return value * tspMl;
+    case "tbsp":
+      return value * tbspMl;
+    case "cup":
+    case "cups":
+      return value * cupMl;
+    default:
+      return null;
+  }
+}
+
+// Decides whether a spice/seasoning shopping item carries a meaningful enough
+// amount to print it. Used to replace blanket category-level amount hiding so
+// that recipes specifying real weights/volumes keep their quantities.
+function shouldShowSpiceAmount(item, profile = ACTIVE_MEASUREMENT_PROFILE) {
+  if (!item || typeof item !== "object") return false;
+  if (item.quantityUnknown) return false;
+  const amount = Number(item.amount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  const unit = String(item.unit || "");
+  if (unit === "g") return amount > SPICE_AMOUNT_DISPLAY_MAX_GRAMS;
+  const ml = estimateMlEquivalentForUnit(amount, unit, profile);
+  // Discrete units (unit, bunch, can, …) and anything we can't measure as a
+  // small volume are treated as real purchase quantities and shown.
+  if (ml === null) return true;
+  return ml > SPICE_AMOUNT_DISPLAY_MAX_ML;
+}
+
+// Turns an aggregated `totals` map (aggregation key -> item) into the grouped,
+// category-ordered shopping checklist markdown lines. Pulled out of
+// generateWeeklyShoppingList so the same rollup/format logic can be run once for
+// a combined list or once per canvas in split mode.
+// Legumes that home cooks commonly buy dried and cook from scratch. Bare
+// "bean" is excluded so fresh green/string beans never match.
+const LEGUMES = new Set([
+  "chickpea",
+  "garbanzo",
+  "black bean",
+  "kidney bean",
+  "cannellini",
+  "borlotti",
+  "pinto bean",
+  "butter bean",
+  "navy bean",
+  "lima bean",
+  "white bean",
+  "lentil",
+  "black eyed pea",
+  "split pea",
+  "adzuki",
+  "mung bean",
+  "fava bean",
+  "broad bean",
+  "great northern bean",
+]);
+
+function matchesLegume(name) {
+  const text = normalizeSearchText(name);
+  if (!text) return false;
+  for (const legume of LEGUMES) {
+    if (text.includes(legume)) return true;
+  }
+  return false;
+}
+
+// Core dried-legume computation shared by the shopping list and recipe view.
+// Given an item ({ name, unit, amount } in metric base units) and optional
+// factor overrides, returns { grams, density, baseName } or null when the item
+// isn't a convertible legume. `unit` is the metric base: "unit" (cans), "g", "ml".
+function computeLegumeDried(item, factors = ACTIVE_LEGUME_FACTORS) {
+  if (!item || typeof item !== "object" || item.quantityUnknown) return null;
+  const rawName = normalizeShoppingDisplayName(stripPreparationPhrases(item.name));
+  if (!matchesLegume(rawName)) return null;
+
+  const amount = Number(item.amount || 0);
+  if (!(amount > 0)) return null;
+
+  const { gramsDriedPerCan, cookedToDriedFactor, densityGPerMl } = resolveLegumeFactors(factors);
+  const text = normalizeSearchText(rawName);
+  const alreadyDried = /\bdried\b/.test(text);
+  const cannedInName = /\b(can|cans|canned|tin|tins|tinned|cooked)\b/.test(text);
+  const unit = String(item.unit || "");
+
+  let driedGrams = null;
+  if (alreadyDried) {
+    // Already specified as dried (typical for a from-scratch recipe): keep the weight.
+    if (unit === "g") driedGrams = amount;
+    else if (unit === "ml") driedGrams = amount * densityGPerMl;
+    else if (unit === "unit") driedGrams = amount * gramsDriedPerCan;
+  } else if (unit === "unit") {
+    driedGrams = amount * gramsDriedPerCan; // counted legumes = cans
+  } else if (cannedInName && (unit === "g" || unit === "ml")) {
+    driedGrams = amount * cookedToDriedFactor; // explicit canned/cooked weight
+  } else if (unit === "g") {
+    driedGrams = amount; // bare weight: assume an already-dry from-scratch amount
+  } else if (unit === "ml") {
+    driedGrams = amount * densityGPerMl;
+  }
+
+  if (!(driedGrams > 0)) return null;
+
+  const baseName = rawName
+    .replace(/\b(canned|tinned|cooked|cans?|tins?|dried)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { grams: Math.round(driedGrams), density: densityGPerMl, baseName };
+}
+
+// For cooks who make legumes from scratch: converts a canned/cooked legume
+// shopping item into a dried-weight equivalent, carrying a secondary ml volume
+// so they can eyeball how much is left in storage. Returns null for non-legumes
+// or quantities it can't convert. Mode-agnostic; the caller decides when to apply it.
+function convertLegumeToDriedForShopping(item, factors = ACTIVE_LEGUME_FACTORS) {
+  const dried = computeLegumeDried(item, factors);
+  if (!dried) return null;
+  return {
+    ...item,
+    name: `dried ${dried.baseName}`.replace(/\s+/g, " ").trim(),
+    unit: "g",
+    amount: dried.grams,
+    secondaryAmount: Math.round(dried.grams / dried.density),
+    secondaryUnit: "ml",
+  };
+}
+
+function buildGroupedShoppingChecklistLines(totals, {
+  categoryConfig,
+  ingredientOverrides = new Map(),
+  includeRecipeUsage = false,
+  includeOverrideLinks = false,
+  legumeMode = "canned",
+  legumeFactors = ACTIVE_LEGUME_FACTORS,
+} = {}) {
+  const config = categoryConfig || {};
+  const totalsValues = totals && typeof totals.values === "function" ? totals.values() : [];
+  const rawItems = [...totalsValues].sort((a, b) => a.name.localeCompare(b.name));
+  const garlicItems = [];
+  const citrusRollup = new Map();
+  const totalItems = [];
+
+  for (const item of rawItems) {
+    const displayName = normalizeShoppingDisplayName(stripPreparationPhrases(item.name));
+    const normalizedDisplayName = normalizeSearchText(displayName);
+
+    // Dried-legume mode: convert canned/cooked legumes to a dried-weight item
+    // (with a secondary ml readout) before any other rollup runs.
+    if (legumeMode === "dried") {
+      const driedLegume = convertLegumeToDriedForShopping({ ...item, name: displayName }, legumeFactors);
+      if (driedLegume) {
+        totalItems.push(driedLegume);
+        continue;
+      }
+    }
+
+    const citrusKey = detectCitrusKey(displayName);
+    const garlicCandidate = isGarlicRollupCandidate(displayName) && !item.quantityUnknown && ["ml", "unit"].includes(item.unit);
+
+    if (garlicCandidate) {
+      garlicItems.push({ ...item, name: displayName });
+      continue;
+    }
+
+    if (!citrusKey) {
+      if (item.quantityUnknown) {
+        totalItems.push({ ...item, name: displayName, unit: "", amount: 0, quantityUnknown: true });
+        continue;
+      }
+      const adjustedAmount =
+        item.unit === "unit" && shouldRoundUpUnitItem(displayName)
+          ? Math.ceil(item.amount)
+          : item.amount;
+      const override = ingredientOverrides.get(displayName);
+      let converted = convertBaseAmountToPreferredUnit(adjustedAmount, item.unit, override?.unit || "");
+      // If still showing raw ml, humanize to weight or volume units
+      if (converted.unit === "ml") {
+        const humanized = humanizeVolumeUnit(converted.amount, "ml", displayName);
+        converted = { amount: humanized.amount, unit: humanized.unit };
+      }
+      totalItems.push({ ...item, name: displayName, amount: converted.amount, unit: converted.unit });
+      continue;
+    }
+
+    const citrus = citrusRollup.get(citrusKey) || {
+      key: citrusKey,
+      category: item.category || "Fresh Fruit and Vegetables",
+      wholeFromJuice: 0,
+      wholeExplicit: 0,
+      recipes: new Set(),
+    };
+
+    const recipeEntries = item.recipes && typeof item.recipes[Symbol.iterator] === "function"
+      ? item.recipes
+      : [];
+    for (const recipe of recipeEntries) citrus.recipes.add(recipe);
+
+    if (/\bjuice\b/.test(normalizedDisplayName)) {
+      citrus.wholeFromJuice += estimateCitrusUnitsFromJuice(item, citrusKey);
+    } else if (/\b(wedge|wedges|rind|zest|peel|segments?)\b/.test(normalizedDisplayName)) {
+      citrus.wholeExplicit += Math.max(1, item.amount);
+    } else if (item.unit === "unit") {
+      citrus.wholeExplicit += item.amount;
+    } else {
+      const adjustedAmount =
+        item.unit === "unit" && shouldRoundUpUnitItem(displayName)
+          ? Math.ceil(item.amount)
+          : item.amount;
+      totalItems.push({ ...item, name: displayName, amount: adjustedAmount });
+    }
+
+    citrusRollup.set(citrusKey, citrus);
+  }
+
+  const garlicRollupItem = buildGarlicRollupItem(garlicItems);
+  if (garlicRollupItem) totalItems.push(garlicRollupItem);
+
+  for (const citrus of citrusRollup.values()) {
+    const rule = CITRUS_RULES[citrus.key];
+    const neededWhole = Math.max(citrus.wholeFromJuice, citrus.wholeExplicit);
+    const roundedWhole = Math.max(1, Math.ceil(neededWhole));
+    totalItems.push({
+      name: roundedWhole === 1 ? rule.singular : rule.plural,
+      unit: "unit",
+      amount: roundedWhole,
+      recipes: citrus.recipes,
+      category: citrus.category || "Fresh Fruit and Vegetables",
+      categoryReason: "citrus rollup",
+    });
+  }
+
+  const categoryOrder = Array.isArray(config.categoryOrder) && config.categoryOrder.length
+    ? config.categoryOrder
+    : SHOPPING_CATEGORY_ORDER;
+  const grouped = new Map();
+  const orderedCategories = [...categoryOrder];
+  for (const category of orderedCategories) grouped.set(category, []);
+  for (const item of totalItems) {
+    const category = String(item.category || config.defaultCategory || "Other");
+    if (!grouped.has(category)) {
+      grouped.set(category, []);
+      orderedCategories.push(category);
+    }
+    grouped.get(category).push(item);
+  }
+
+  const groupedIngredientLines = [];
+  for (const category of orderedCategories) {
+    const items = grouped.get(category) || [];
+    if (items.length === 0) continue;
+    groupedIngredientLines.push(`- ${category}`);
+    const isSpiceCategory =
+      category === "Spices and Seasoning" || category === "Herbs, Spices and Seasonings";
+    for (const item of items) {
+      // Within spice categories, only hide the amount for pinch-sized
+      // quantities; meaningful weights/volumes (e.g. 100 g saffron) keep theirs.
+      const noAmountCategory = isSpiceCategory && !shouldShowSpiceAmount(item);
+      groupedIngredientLines.push(...formatShoppingListItemLines(item, {
+        includeRecipeUsage,
+        includeOverrideLinks,
+        noAmountCategory,
+      }));
+    }
+  }
+
+  return groupedIngredientLines;
 }
 
 function pluralizeSimple(name, amount) {
@@ -1831,12 +2631,59 @@ function normalizeDirectionsSectionLines(directionLines, ingredientLines) {
   return directions.map((line) => boldDirectionIngredientMentions(line, mentionPhrases));
 }
 
+// Leading descriptor words that describe a state/size but not a distinct
+// shopping item, so they can be dropped when building the aggregation key
+// (e.g. "baby spinach" -> "spinach", "plain flour" -> "flour"). Deliberately
+// conservative: words like "brown" (brown vs white sugar), "dried" and "fresh"
+// (dried vs fresh herbs land in different shopping sections — and bare "oregano"
+// usually means dried) are intentionally excluded because they change which
+// product you actually buy and where you buy it.
+const AGGREGATION_LEADING_DESCRIPTORS = new Set([
+  "baby",
+  "plain",
+  "raw",
+  "ripe",
+  "whole",
+]);
+
+// Herbs sold fresh by default, so the bare name already implies "fresh". For
+// these, "fresh basil" should aggregate with "basil". Herbs NOT listed here
+// (oregano, thyme, rosemary, sage) usually mean dried when bare, so their
+// "fresh X" form is deliberately kept as a separate shopping line.
+const TYPICALLY_FRESH_HERBS = new Set([
+  "basil",
+  "parsley",
+  "coriander",
+  "cilantro",
+  "mint",
+  "dill",
+  "chive",
+]);
+
+function isTypicallyFreshHerb(text) {
+  const normalized = normalizeSearchText(text);
+  if (!normalized) return false;
+  if (TYPICALLY_FRESH_HERBS.has(normalized)) return true;
+  return TYPICALLY_FRESH_HERBS.has(normalizeSearchText(singularizeSimple(normalized)));
+}
+
 function normalizedAggregationName(name) {
   const text = normalizeSearchText(name);
   if (!text) return "";
-  const words = text.split(" ");
-  const last = words[words.length - 1] || "";
-  words[words.length - 1] = normalizeSearchText(singularizeSimple(last));
+  let words = text.split(" ").filter(Boolean);
+  // Drop leading descriptor adjectives that don't change the shopping item,
+  // but always keep at least one word so a name never collapses to nothing.
+  while (words.length > 1 && AGGREGATION_LEADING_DESCRIPTORS.has(words[0])) {
+    words = words.slice(1);
+  }
+  // "fresh" is normally kept (fresh vs dried changes the product/section), but
+  // for herbs that are fresh by default, "fresh basil" == "basil".
+  if (words.length > 1 && words[0] === "fresh" && isTypicallyFreshHerb(words.slice(1).join(" "))) {
+    words = words.slice(1);
+  }
+  // Singularize every word so plural forms collapse across the whole compound
+  // noun, not just the final word ("cherry tomatoes" -> "cherry tomato").
+  words = words.map((word) => normalizeSearchText(singularizeSimple(word)) || word);
   return words.join(" ").trim();
 }
 
@@ -2833,6 +3680,49 @@ function parseNumberLike(value, fallback = 0) {
   return fallback;
 }
 
+// Normalizes a frozen-portion count: never negative, capped to 2 decimals to
+// match how generateWeeklyShoppingList persists projected frozen values.
+function clampFrozenPortionValue(value) {
+  const num = parseNumberLike(value, 0);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  return Number(num.toFixed(2));
+}
+
+// Applies a +/- step to a frozen-portion count, clamping at zero. Used by the
+// frozen inventory manager's increment/decrement controls.
+function adjustFrozenPortionValue(current, delta) {
+  const base = Math.max(0, parseNumberLike(current, 0));
+  return clampFrozenPortionValue(base + parseNumberLike(delta, 0));
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Whole days between an ISO timestamp and now. Returns null for missing or
+// unparseable dates.
+function frozenAgeInDays(lastUpdateIso, now = new Date()) {
+  if (!lastUpdateIso) return null;
+  const then = new Date(lastUpdateIso);
+  const thenMs = then.getTime();
+  if (Number.isNaN(thenMs)) return null;
+  const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  if (Number.isNaN(nowMs)) return null;
+  return Math.floor((nowMs - thenMs) / DAY_MS);
+}
+
+// Human-readable age of a frozen-inventory entry plus a staleness flag, for the
+// frozen inventory manager. `lastUpdateIso` is the LastFrozenInventoryUpdate
+// frontmatter value (the best available proxy for when it was frozen).
+function describeFrozenAge(lastUpdateIso, { now = new Date(), staleDays = 90 } = {}) {
+  const days = frozenAgeInDays(lastUpdateIso, now);
+  if (days === null) return { label: "no freeze date recorded", days: null, isStale: false };
+  let label;
+  if (days <= 0) label = "frozen today";
+  else if (days === 1) label = "frozen 1 day ago";
+  else label = `frozen ${days} days ago`;
+  const isStale = Number.isFinite(staleDays) && staleDays > 0 && days >= staleDays;
+  return { label, days, isStale };
+}
+
 function parseBooleanLike(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -3113,6 +4003,153 @@ class IngredientEntryModal extends Modal {
   }
 }
 
+// Lists every recipe note with its current FrozenPortionsAvailable value and
+// lets the user increment / decrement / zero each one inline. Writes are
+// persisted immediately to frontmatter.
+class FrozenInventoryModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  readFrozenValue(file) {
+    const cache = this.app.metadataCache.getFileCache(file);
+    const fm = cache?.frontmatter || {};
+    return clampFrozenPortionValue(fm.FrozenPortionsAvailable);
+  }
+
+  readFrozenUpdateIso(file) {
+    const cache = this.app.metadataCache.getFileCache(file);
+    const fm = cache?.frontmatter || {};
+    return fm.LastFrozenInventoryUpdate || "";
+  }
+
+  get staleDays() {
+    return parseNumberLike(this.plugin.settings.frozenStaleWarningDays, 90);
+  }
+
+  onOpen() {
+    const { contentEl, titleEl } = this;
+    titleEl.setText("Manage frozen portions");
+    contentEl.empty();
+
+    const recipes = this.app.vault
+      .getMarkdownFiles()
+      .filter((file) => this.plugin.isRecipeFile(file))
+      .sort((a, b) => a.basename.localeCompare(b.basename, undefined, { sensitivity: "base" }));
+
+    if (recipes.length === 0) {
+      contentEl.createEl("p", { text: "No recipe notes found." });
+      return;
+    }
+
+    const intro = contentEl.createEl("p", {
+      text: "Adjust how many cooked portions you currently have frozen for each recipe. Changes save immediately.",
+    });
+    intro.style.marginTop = "0";
+
+    const searchInput = contentEl.createEl("input", { type: "text" });
+    searchInput.placeholder = "Filter recipes…";
+    searchInput.style.width = "100%";
+    searchInput.style.marginBottom = "12px";
+
+    const listEl = contentEl.createDiv({ cls: "weekly-meal-shopper-frozen-list" });
+    listEl.style.maxHeight = "55vh";
+    listEl.style.overflowY = "auto";
+
+    const rows = recipes.map((file) => this.buildRow(listEl, file));
+
+    const applyFilter = () => {
+      const query = normalizeSearchText(searchInput.value || "");
+      for (const row of rows) {
+        const match = !query || normalizeSearchText(row.file.basename).includes(query);
+        row.el.style.display = match ? "flex" : "none";
+      }
+    };
+    searchInput.addEventListener("input", applyFilter);
+
+    window.setTimeout(() => searchInput.focus(), 0);
+  }
+
+  buildRow(listEl, file) {
+    let value = this.readFrozenValue(file);
+
+    const row = listEl.createDiv({ cls: "weekly-meal-shopper-frozen-row" });
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.justifyContent = "space-between";
+    row.style.gap = "8px";
+    row.style.padding = "6px 0";
+    row.style.borderBottom = "1px solid var(--background-modifier-border)";
+
+    const nameCol = row.createDiv();
+    nameCol.style.flex = "1";
+    nameCol.style.overflow = "hidden";
+    nameCol.style.minWidth = "0";
+
+    const nameEl = nameCol.createDiv({ text: file.basename });
+    nameEl.style.overflow = "hidden";
+    nameEl.style.textOverflow = "ellipsis";
+    nameEl.style.whiteSpace = "nowrap";
+
+    const ageEl = nameCol.createDiv();
+    ageEl.style.fontSize = "var(--font-ui-smaller)";
+    ageEl.style.color = "var(--text-muted)";
+
+    const refreshAge = () => {
+      const age = describeFrozenAge(this.readFrozenUpdateIso(file), { staleDays: this.staleDays });
+      if (value <= 0) {
+        ageEl.setText("");
+        return;
+      }
+      ageEl.setText(age.isStale ? `${age.label} ⚠️ check before eating` : age.label);
+      ageEl.style.color = age.isStale ? "var(--text-error)" : "var(--text-muted)";
+    };
+    refreshAge();
+
+    const controls = row.createDiv();
+    controls.style.display = "flex";
+    controls.style.alignItems = "center";
+    controls.style.gap = "6px";
+
+    const decBtn = controls.createEl("button", { text: "−" });
+    const input = controls.createEl("input", { type: "number" });
+    input.min = "0";
+    input.step = "0.5";
+    input.value = String(value);
+    input.style.width = "64px";
+    input.style.textAlign = "center";
+    const incBtn = controls.createEl("button", { text: "+" });
+    const zeroBtn = controls.createEl("button", { text: "Zero" });
+
+    const commit = async (nextValue) => {
+      value = clampFrozenPortionValue(nextValue);
+      input.value = String(value);
+      await this.plugin.setRecipeFrozenPortions(file, value);
+      // The write just stamped LastFrozenInventoryUpdate to now; reflect that
+      // immediately rather than waiting on the metadata cache.
+      if (value <= 0) {
+        ageEl.setText("");
+      } else {
+        const age = describeFrozenAge(new Date().toISOString(), { staleDays: this.staleDays });
+        ageEl.setText(age.label);
+        ageEl.style.color = "var(--text-muted)";
+      }
+    };
+
+    decBtn.addEventListener("click", () => commit(adjustFrozenPortionValue(value, -1)));
+    incBtn.addEventListener("click", () => commit(adjustFrozenPortionValue(value, 1)));
+    zeroBtn.addEventListener("click", () => commit(0));
+    input.addEventListener("change", () => commit(input.value));
+
+    return { file, el: row };
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 class TextEntryModal extends Modal {
   constructor(app, options) {
     super(app);
@@ -3304,6 +4341,213 @@ class TemplateSetupModal extends Modal {
   }
 }
 
+// ── Recipe card helpers (originally from recipe-view-alt) ─────────────────────
+
+const RECIPE_CARD_FRACTION_MAP = {
+  "1/2": "1⁄2", "1/3": "1⁄3", "2/3": "2⁄3",
+  "1/4": "1⁄4", "3/4": "3⁄4", "1/8": "1⁄8",
+};
+
+function recipeCardStripFrontmatter(markdown) {
+  if (!markdown.startsWith("---\n")) return markdown;
+  const end = markdown.indexOf("\n---", 4);
+  if (end === -1) return markdown;
+  return markdown.slice(end + 4).replace(/^\n+/, "");
+}
+
+function recipeCardSplitSections(markdown) {
+  const lines = recipeCardStripFrontmatter(markdown).split(/\r?\n/);
+  const sections = [];
+  let current = { heading: "", level: 0, lines: [] };
+  for (const line of lines) {
+    const h = line.match(/^(#{1,6})\s+(.+)$/);
+    if (h) {
+      sections.push(current);
+      current = { heading: h[2].trim(), level: h[1].length, lines: [line] };
+    } else {
+      current.lines.push(line);
+    }
+  }
+  sections.push(current);
+  return sections;
+}
+
+function recipeCardNormalizeComponentKey(text) {
+  return String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function recipeCardParseComponentPairs(markdown) {
+  const lines = recipeCardStripFrontmatter(markdown).split(/\r?\n/);
+  let mode = "", sectionLevel = 0, currentKey = "", currentTitle = "";
+  const ingMap = new Map(), dirMap = new Map(), titleMap = new Map();
+  const ensure = (map, key) => { if (!map.has(key)) map.set(key, []); return map.get(key); };
+  const setCurrent = (heading) => {
+    const key = recipeCardNormalizeComponentKey(heading);
+    currentKey = key || "";
+    currentTitle = heading || "";
+    if (key && !titleMap.has(key)) titleMap.set(key, heading);
+  };
+  for (const line of lines) {
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      const text = heading[2].trim();
+      const norm = recipeCardNormalizeComponentKey(text);
+      if (norm === "ingredients") { mode = "ingredients"; sectionLevel = level; currentKey = ""; currentTitle = ""; continue; }
+      if (norm === "directions" || norm === "method" || norm === "instructions") { mode = "directions"; sectionLevel = level; currentKey = ""; currentTitle = ""; continue; }
+      if (!mode) continue;
+      if (level <= sectionLevel) { mode = ""; sectionLevel = 0; currentKey = ""; currentTitle = ""; continue; }
+      setCurrent(text); continue;
+    }
+    if (!mode) continue;
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (mode === "ingredients") {
+      if (/^[-*+]\s+/.test(trimmed)) { const key = currentKey || "__base"; ensure(ingMap, key).push(trimmed); if (!titleMap.has(key) && currentTitle) titleMap.set(key, currentTitle); }
+      continue;
+    }
+    if (mode === "directions") {
+      if (/^\d+\.\s+/.test(trimmed) || /^[-*+]\s+/.test(trimmed) || currentKey) { const key = currentKey || "__base"; ensure(dirMap, key).push(trimmed); if (!titleMap.has(key) && currentTitle) titleMap.set(key, currentTitle); }
+    }
+  }
+  const keys = [...new Set([...ingMap.keys(), ...dirMap.keys()])].filter((k) => k !== "__base");
+  const hasStructured = keys.length > 0 && keys.some((k) => ingMap.has(k) && dirMap.has(k));
+  if (!hasStructured) return [];
+  return keys.map((key) => ({
+    key,
+    title: titleMap.get(key) || key,
+    ingredientsMarkdown: (ingMap.get(key) || []).join("\n"),
+    directionsMarkdown: (dirMap.get(key) || []).join("\n"),
+  }));
+}
+
+function recipeCardMaybeRenderFractions(text, enabled) {
+  if (!enabled) return text;
+  let out = text;
+  for (const [ascii, uni] of Object.entries(RECIPE_CARD_FRACTION_MAP)) {
+    out = out.replace(new RegExp(`\\b${ascii.replace("/", "\\/")}\\b`, "g"), uni);
+  }
+  return out;
+}
+
+// Modal-style recipe card with planning toolbar (Add to Weekly Plan, etc.)
+class RecipeCardModal extends Modal {
+  constructor(app, plugin, file) {
+    super(app);
+    this.plugin = plugin;
+    this.file = file;
+    this.resizeObserver = null;
+  }
+
+  async onOpen() {
+    this.modalEl.addClass("recipe-view-alt-modal");
+    const { contentEl, titleEl } = this;
+    titleEl.setText(this.file.basename);
+    contentEl.empty();
+
+    const root = contentEl.createDiv({ cls: "recipe-view-alt-root" });
+    const toolbar = root.createDiv({ cls: "recipe-view-alt-toolbar" });
+
+    const addBtn = (label, fn, cta = false) => {
+      const btn = toolbar.createEl("button", { text: label });
+      if (cta) btn.addClass("mod-cta");
+      btn.addEventListener("click", fn);
+      return btn;
+    };
+
+    addBtn("Add To Weekly Plan", async () => this.plugin.addRecipeToCanvas(this.file.path, "default"));
+    addBtn("Add As Project", async () => this.plugin.addRecipeToCanvas(this.file.path, "project"));
+    addBtn("Add As Hosting", async () => this.plugin.addRecipeToCanvas(this.file.path, "hosting"));
+    addBtn("Generate Shopping List", async () => {
+      const ok = this.app.commands.executeCommandById("weekly-meal-shopper:generate-weekly-shopping-list-from-canvas");
+      if (!ok) new Notice("Generate shopping list command not found.");
+    }, true);
+
+    const layout = root.createDiv({ cls: "recipe-view-alt-layout" });
+    const side = layout.createDiv({ cls: "recipe-view-alt-col" });
+    const main = layout.createDiv({ cls: "recipe-view-alt-col" });
+
+    side.createDiv({ cls: "recipe-view-alt-label", text: "Ingredients / Side" });
+    main.createDiv({ cls: "recipe-view-alt-label", text: "Directions / Main" });
+
+    const markdown = await this.app.vault.read(this.file);
+    const componentPairs = recipeCardParseComponentPairs(markdown);
+    const sections = recipeCardSplitSections(markdown);
+    const sideRegex = new RegExp(this.plugin.settings.recipeCardSideColumnRegex || "Ingredients", "i");
+
+    let titleFromH1 = this.file.basename;
+    const sideBlocks = [];
+    const mainBlocks = [];
+
+    for (const section of sections) {
+      const raw = section.lines.join("\n").trim();
+      if (!raw) continue;
+      if (section.level === 1 && this.plugin.settings.recipeCardTreatH1AsFilename) {
+        titleFromH1 = section.heading || titleFromH1;
+        continue;
+      }
+      const block = recipeCardMaybeRenderFractions(raw, this.plugin.settings.recipeCardRenderUnicodeFractions);
+      if (section.heading && sideRegex.test(section.heading)) sideBlocks.push(block);
+      else mainBlocks.push(block);
+    }
+
+    titleEl.setText(titleFromH1);
+
+    const renderBlocks = async (blocks, target) => {
+      for (const block of blocks) {
+        const wrapper = target.createDiv();
+        await MarkdownRenderer.render(this.app, block, wrapper, this.file.path, this.plugin);
+      }
+    };
+
+    if (componentPairs.length > 0) {
+      layout.remove();
+      const componentsRoot = root.createDiv({ cls: "recipe-view-alt-components" });
+      componentsRoot.createDiv({ cls: "recipe-view-alt-label", text: "Components" });
+      for (const pair of componentPairs) {
+        const card = componentsRoot.createDiv({ cls: "recipe-view-alt-component" });
+        card.createEl("h3", { cls: "recipe-view-alt-component-title", text: pair.title });
+        const grid = card.createDiv({ cls: "recipe-view-alt-component-grid" });
+        const iCol = grid.createDiv({ cls: "recipe-view-alt-component-col" });
+        iCol.createDiv({ cls: "recipe-view-alt-label", text: "Ingredients" });
+        const dCol = grid.createDiv({ cls: "recipe-view-alt-component-col" });
+        dCol.createDiv({ cls: "recipe-view-alt-label", text: "Directions" });
+        await MarkdownRenderer.render(this.app, pair.ingredientsMarkdown || "- (No component ingredients)", iCol, this.file.path, this.plugin);
+        await MarkdownRenderer.render(this.app, pair.directionsMarkdown || "- (No component directions)", dCol, this.file.path, this.plugin);
+      }
+      const applyComponentLayout = () => {
+        const grids = componentsRoot.querySelectorAll(".recipe-view-alt-component-grid");
+        for (const grid of grids) {
+          const single = grid.clientWidth < this.plugin.settings.recipeCardSingleColumnMaxWidth;
+          grid.classList.toggle("single-column", single);
+        }
+      };
+      this.resizeObserver = new ResizeObserver(() => applyComponentLayout());
+      this.resizeObserver.observe(componentsRoot);
+      applyComponentLayout();
+      return;
+    }
+
+    await renderBlocks(sideBlocks.length ? sideBlocks : ["## Ingredients\n- No ingredients section found"], side);
+    await renderBlocks(mainBlocks.length ? mainBlocks : ["## Directions\n- No directions section found"], main);
+
+    const applyLayoutMode = () => {
+      const width = layout.clientWidth;
+      const single = width < this.plugin.settings.recipeCardSingleColumnMaxWidth;
+      layout.toggleClass("single-column", single);
+    };
+    this.resizeObserver = new ResizeObserver(() => applyLayoutMode());
+    this.resizeObserver.observe(layout);
+    applyLayoutMode();
+  }
+
+  onClose() {
+    if (this.resizeObserver) this.resizeObserver.disconnect();
+    this.contentEl.empty();
+    this.plugin.activeRecipeCardModal = null;
+  }
+}
+
 class TranscribedIngredientReviewModal extends Modal {
   constructor(app, { title, rawIngredients, onSave, onDiscard }) {
     super(app);
@@ -3317,42 +4561,84 @@ class TranscribedIngredientReviewModal extends Modal {
   onOpen() {
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: `Review ingredients: ${this.recipeTitle}` });
-    this.contentEl.createEl("p", {
-      text: "Edit or remove lines below before saving. Each line is one ingredient as returned by AI.",
-      cls: "setting-item-description",
-    });
 
+    const desc = this.contentEl.createEl("p", { cls: "setting-item-description" });
+    desc.setText(
+      "Check each line before saving — this is the raw AI output before normalisation. " +
+      "Edit, delete, or add lines. Press Ctrl+Enter to save, Escape to skip this recipe."
+    );
+
+    this.countEl = this.contentEl.createEl("p", { cls: "setting-item-description" });
     this.listContainer = this.contentEl.createDiv();
     this.renderList();
 
     const btnRow = this.contentEl.createDiv({ cls: "modal-button-container" });
-    const discardBtn = btnRow.createEl("button", { text: "Discard recipe" });
+    const discardBtn = btnRow.createEl("button", { text: "Skip recipe (don't save)" });
+    discardBtn.setAttribute("title", "Discard this recipe and continue to the next one.");
     discardBtn.addEventListener("click", () => {
       this.saved = false;
       this.close();
     });
-    const saveBtn = btnRow.createEl("button", { text: "Save recipe", cls: "mod-cta" });
+    const saveBtn = btnRow.createEl("button", { text: "Save recipe →", cls: "mod-cta" });
+    saveBtn.setAttribute("title", "Save ingredients and continue (Ctrl+Enter).");
     saveBtn.addEventListener("click", () => {
       this.saved = true;
       this.close();
     });
+
+    // Ctrl+Enter saves; Escape already closes via Obsidian Modal default.
+    this.modalEl.addEventListener("keydown", (evt) => {
+      if ((evt.ctrlKey || evt.metaKey) && evt.key === "Enter") {
+        evt.preventDefault();
+        this.saved = true;
+        this.close();
+      }
+    });
+  }
+
+  updateCount() {
+    const n = this.rawIngredients.filter((l) => l.trim()).length;
+    if (this.countEl) this.countEl.setText(`${n} ingredient${n === 1 ? "" : "s"}`);
   }
 
   renderList() {
     this.listContainer.empty();
     this.rawIngredients.forEach((line, index) => {
       const row = this.listContainer.createDiv({ cls: "setting-item" });
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      row.style.gap = "6px";
       const input = row.createEl("input", { type: "text", cls: "wms-review-input" });
       input.value = line;
       input.style.flex = "1";
-      input.addEventListener("input", () => { this.rawIngredients[index] = input.value; });
+      input.addEventListener("input", () => {
+        this.rawIngredients[index] = input.value;
+        this.updateCount();
+      });
+      // Tab to next row
+      input.addEventListener("keydown", (evt) => {
+        if (evt.key === "Tab" && !evt.shiftKey) {
+          evt.preventDefault();
+          const inputs = this.listContainer.querySelectorAll(".wms-review-input");
+          if (index < inputs.length - 1) {
+            inputs[index + 1].focus();
+          } else {
+            // Tab from last input → add new row
+            this.rawIngredients.push("");
+            this.renderList();
+            const newInputs = this.listContainer.querySelectorAll(".wms-review-input");
+            if (newInputs.length > 0) newInputs[newInputs.length - 1].focus();
+          }
+        }
+      });
       const deleteBtn = row.createEl("button", { text: "×" });
-      deleteBtn.style.marginLeft = "8px";
+      deleteBtn.setAttribute("title", "Remove this ingredient line");
       deleteBtn.addEventListener("click", () => {
         this.rawIngredients.splice(index, 1);
         this.renderList();
       });
     });
+
     const addBtn = this.listContainer.createEl("button", { text: "+ Add ingredient line" });
     addBtn.style.marginTop = "8px";
     addBtn.addEventListener("click", () => {
@@ -3361,6 +4647,8 @@ class TranscribedIngredientReviewModal extends Modal {
       const inputs = this.listContainer.querySelectorAll(".wms-review-input");
       if (inputs.length > 0) inputs[inputs.length - 1].focus();
     });
+
+    this.updateCount();
   }
 
   onClose() {
@@ -3384,6 +4672,7 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     this.addSettingTab(new WeeklyMealShopperSettingTab(this.app, this));
     this.recipeViewOverlay = null;
+    this.activeRecipeCardModal = null;
     this.parsedIngredientCache = new Map();
     this.registerMarkdownPostProcessor((element, context) => {
       this.attachShoppingListOverrideLinks(element, context);
@@ -3465,37 +4754,6 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "standardize-recipe-formats-in-folder",
-      name: "Standardize recipe formats in configured folder",
-      callback: async () => {
-        const normalizedFolder = normalizePath(this.settings.recipeFolder);
-        const recipeFiles = this.app.vault
-          .getMarkdownFiles()
-          .filter((file) => file.path.startsWith(`${normalizedFolder}/`) || file.path === normalizedFolder)
-          .filter((file) => this.isRecipeFile(file));
-
-        let updated = 0;
-        let skippedLegacy = 0;
-        for (const recipeFile of recipeFiles) {
-          const content = await this.app.vault.read(recipeFile);
-          const parsedSections = parseSections(splitFrontmatter(content).body);
-          if (!recipeIngredientLinesAreStructured(parsedSections.ingredients)) {
-            skippedLegacy += 1;
-            continue;
-          }
-          const changed = await this.standardizeRecipeFile(recipeFile);
-          if (changed) updated += 1;
-        }
-
-        if (skippedLegacy > 0) {
-          new Notice(`Standardized ${updated} recipe notes. Skipped ${skippedLegacy} legacy recipe notes that need 'Standardize current recipe format' first.`);
-          return;
-        }
-        new Notice(`Standardized ${updated} recipe notes.`);
-      },
-    });
-
-    this.addCommand({
       id: "populate-recipe-ingredient-metadata",
       name: "Populate ingredient metadata from recipe section",
       callback: async () => {
@@ -3543,6 +4801,22 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "manage-frozen-portions-inventory",
+      name: "Manage frozen portions inventory",
+      callback: () => {
+        this.openFrozenInventoryModal();
+      },
+    });
+
+    this.addCommand({
+      id: "validate-recipes",
+      name: "Validate recipes (data-quality report)",
+      callback: async () => {
+        await this.validateRecipes();
+      },
+    });
+
+    this.addCommand({
       id: "create-weekly-meal-prep-canvas",
       name: "Open or create meal plan canvas",
       callback: async () => {
@@ -3574,10 +4848,127 @@ class WeeklyMealShopperPlugin extends Plugin {
       },
     });
 
+    // Recipe card modal (planning view — add to canvas, fractions, component layout)
+    this.addCommand({
+      id: "open-recipe-card-modal",
+      name: "Open recipe card (planning view)",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!(file instanceof TFile) || file.extension !== "md") {
+          new Notice("Open a markdown recipe note first.");
+          return;
+        }
+        if (this.activeRecipeCardModal) {
+          this.activeRecipeCardModal.close();
+          return;
+        }
+        this.activeRecipeCardModal = new RecipeCardModal(this.app, this, file);
+        this.activeRecipeCardModal.open();
+      },
+    });
+
+    this.addCommand({
+      id: "add-active-recipe-to-canvas-default",
+      name: "Add active recipe to weekly meal plan (default)",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!(file instanceof TFile) || file.extension !== "md") { new Notice("Open a recipe note first."); return; }
+        await this.addRecipeToCanvas(file.path, "default");
+      },
+    });
+
+    this.addCommand({
+      id: "add-active-recipe-to-canvas-project",
+      name: "Add active recipe to weekly meal plan (project)",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!(file instanceof TFile) || file.extension !== "md") { new Notice("Open a recipe note first."); return; }
+        await this.addRecipeToCanvas(file.path, "project");
+      },
+    });
+
+    this.addCommand({
+      id: "add-active-recipe-to-canvas-hosting",
+      name: "Add active recipe to weekly meal plan (hosting)",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!(file instanceof TFile) || file.extension !== "md") { new Notice("Open a recipe note first."); return; }
+        await this.addRecipeToCanvas(file.path, "hosting");
+      },
+    });
+
   }
 
   onunload() {
+    if (this.activeRecipeCardModal) this.activeRecipeCardModal.close();
     this.closeRecipeViewOverlay({ restoreLivePreview: false });
+  }
+
+  // Adds a recipe file node to the weekly meal-plan canvas.
+  // section: "default" | "project" | "hosting"
+  async addRecipeToCanvas(filePath, section = "default") {
+    const canvasPath = normalizePath(this.settings.weeklyCanvasPath || DEFAULT_SETTINGS.weeklyCanvasPath);
+    const target = this.app.vault.getAbstractFileByPath(canvasPath);
+    if (!(target instanceof TFile) || target.extension !== "canvas") {
+      new Notice(`Meal plan canvas not found: ${canvasPath}`);
+      return false;
+    }
+
+    let canvas;
+    try {
+      canvas = JSON.parse(await this.app.vault.read(target));
+    } catch {
+      new Notice("Could not parse meal plan canvas JSON.");
+      return false;
+    }
+
+    if (!Array.isArray(canvas.nodes)) canvas.nodes = [];
+    if (!Array.isArray(canvas.edges)) canvas.edges = [];
+
+    const normalizedFile = normalizePath(filePath);
+    const alreadyPresent = canvas.nodes.find((n) => n && n.type === "file" && n.file === normalizedFile);
+    if (alreadyPresent) {
+      new Notice("Recipe already exists on the meal plan canvas.");
+      return false;
+    }
+
+    let x = 100;
+    let y = 100;
+
+    const groups = canvas.nodes.filter((n) => n && n.type === "group");
+    const labelPattern =
+      section === "project" ? /project/i :
+      section === "hosting" ? /hosting/i :
+      null;
+    const group = labelPattern ? groups.find((g) => labelPattern.test(String(g.label || ""))) : null;
+
+    if (group) {
+      const inGroup = canvas.nodes.filter((n) => {
+        if (!n || n.type === "group") return false;
+        const cx = (Number(n.x) || 0) + (Number(n.width) || 0) / 2;
+        const cy = (Number(n.y) || 0) + (Number(n.height) || 0) / 2;
+        return (
+          cx >= (Number(group.x) || 0) &&
+          cx <= (Number(group.x) || 0) + (Number(group.width) || 0) &&
+          cy >= (Number(group.y) || 0) &&
+          cy <= (Number(group.y) || 0) + (Number(group.height) || 0)
+        );
+      });
+      x = (Number(group.x) || 0) + 24;
+      y = (Number(group.y) || 0) + 24 + inGroup.length * 34;
+    } else {
+      const maxX = canvas.nodes.reduce((m, n) => Math.max(m, Number(n?.x) || 0), 0);
+      y = 100 + canvas.nodes.filter((n) => n && n.type !== "group").length * 24;
+      x = maxX + 120;
+    }
+
+    const nodeId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+    canvas.nodes.push({ id: nodeId, type: "file", file: normalizedFile, x, y, width: 380, height: 280 });
+
+    await this.app.vault.modify(target, `${JSON.stringify(canvas, null, 2)}\n`);
+    const basename = normalizedFile.split("/").pop()?.replace(/\.md$/, "") || normalizedFile;
+    new Notice(`Added ${basename} to meal plan canvas (${section}).`);
+    return true;
   }
 
   async loadSettings() {
@@ -3637,6 +5028,15 @@ class WeeklyMealShopperPlugin extends Plugin {
     }
     delete this.settings.showCategoryReasonsInShoppingList;
     this.settings.includeOverrideLinksInShoppingList = this.settings.includeOverrideLinksInShoppingList === true;
+    // Recipe card settings (merged from recipe-view-alt)
+    this.settings.recipeCardSideColumnRegex = String(
+      this.settings.recipeCardSideColumnRegex || DEFAULT_SETTINGS.recipeCardSideColumnRegex
+    ).trim() || DEFAULT_SETTINGS.recipeCardSideColumnRegex;
+    this.settings.recipeCardTreatH1AsFilename = this.settings.recipeCardTreatH1AsFilename === true;
+    this.settings.recipeCardRenderUnicodeFractions = this.settings.recipeCardRenderUnicodeFractions !== false;
+    this.settings.recipeCardSingleColumnMaxWidth = Number.isFinite(Number(this.settings.recipeCardSingleColumnMaxWidth))
+      ? Number(this.settings.recipeCardSingleColumnMaxWidth)
+      : DEFAULT_SETTINGS.recipeCardSingleColumnMaxWidth;
     delete this.settings.settingsImportExportPath;
     const sectionState = this.settings.settingsSectionState && typeof this.settings.settingsSectionState === "object"
       ? this.settings.settingsSectionState
@@ -3645,6 +5045,7 @@ class WeeklyMealShopperPlugin extends Plugin {
       firstTimeSetupCollapsed: !!sectionState.firstTimeSetupCollapsed,
       mealPrepSetupCollapsed: !!sectionState.mealPrepSetupCollapsed,
       recipeSetupCollapsed: !!sectionState.recipeSetupCollapsed,
+      recipeCardCollapsed: !!sectionState.recipeCardCollapsed,
       ingredientFormatCollapsed: !!sectionState.ingredientFormatCollapsed,
       recipeTranscriptionCollapsed: !!sectionState.recipeTranscriptionCollapsed,
       shoppingCategoriesCollapsed: !!sectionState.shoppingCategoriesCollapsed,
@@ -3975,7 +5376,16 @@ class WeeklyMealShopperPlugin extends Plugin {
     const path = normalizePath(templatePath);
     const exists = await this.app.vault.adapter.exists(path);
     if (!exists) {
-      throw new Error(`Plugin template not found: ${path}`);
+      const bundledDefault = getBundledTemplateDefault(templatePath);
+      if (bundledDefault === null) {
+        throw new Error(`Plugin template not found: ${path}`);
+      }
+      const parentFolder = path.split("/").slice(0, -1).join("/");
+      if (parentFolder && !(await this.app.vault.adapter.exists(parentFolder))) {
+        await this.app.vault.adapter.mkdir(parentFolder);
+      }
+      await this.app.vault.adapter.write(path, bundledDefault);
+      return bundledDefault;
     }
     return await this.app.vault.adapter.read(path);
   }
@@ -5018,6 +6428,7 @@ class WeeklyMealShopperPlugin extends Plugin {
           await this.saveTranscribedRecipeNote(recipe, {
             openFile: false,
             useOpenAIStandardization: true,
+            showReview: true,
           });
         }
         processedImages += 1;
@@ -5929,6 +7340,54 @@ class WeeklyMealShopperPlugin extends Plugin {
     new Notice(`Frozen portions base opened for ${withFrozenCount} recipes.`);
   }
 
+  async setRecipeFrozenPortions(file, value) {
+    const clamped = clampFrozenPortionValue(value);
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      frontmatter.FrozenPortionsAvailable = clamped;
+      frontmatter.LastFrozenInventoryUpdate = new Date().toISOString();
+    });
+    return clamped;
+  }
+
+  openFrozenInventoryModal() {
+    new FrozenInventoryModal(this.app, this).open();
+  }
+
+  async validateRecipes() {
+    const categoryConfig = await this.loadIngredientCategoryConfig();
+    const recipes = this.app.vault.getMarkdownFiles().filter((file) => this.isRecipeFile(file));
+
+    const reports = [];
+    for (const file of recipes) {
+      let content = "";
+      try {
+        content = await this.app.vault.read(file);
+      } catch (error) {
+        reports.push({ name: file.basename, link: `[[${file.path}|${file.basename}]]`, findings: [{ severity: "error", type: "read", message: `Could not read file: ${error?.message || error}` }] });
+        continue;
+      }
+      const ingredientLines = Array.from(extractIngredientsSection(content));
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+      const portions = fm.Portions ?? fm.Servings ?? null;
+      const findings = validateRecipeData({ ingredientLines, portions, categoryConfig });
+      if (findings.length > 0) {
+        reports.push({ name: file.basename, link: `[[${file.path}|${file.basename}]]`, findings });
+      }
+    }
+
+    const generated = buildRecipeValidationReport(reports, recipes.length);
+    const outputPath = normalizePath("Utility/🩺 Recipe Validation Report.md");
+    const existing = this.app.vault.getAbstractFileByPath(outputPath);
+    if (existing instanceof TFile) {
+      await this.app.vault.modify(existing, generated);
+      await this.app.workspace.getLeaf(true).openFile(existing);
+    } else {
+      const created = await this.app.vault.create(outputPath, generated);
+      await this.app.workspace.getLeaf(true).openFile(created);
+    }
+    new Notice(`Validated ${recipes.length} recipe(s); ${reports.length} with findings.`);
+  }
+
   getRecipePortions(file) {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter || {};
@@ -6002,6 +7461,27 @@ class WeeklyMealShopperPlugin extends Plugin {
     );
   }
 
+  // Opens the unit-aliases.json config for editing. It lives under
+  // .obsidian/plugins/ (outside the indexed vault), so prefer Obsidian's
+  // default-app / reveal-in-folder helpers and fall back to showing the path.
+  async revealUnitAliasConfigFile() {
+    await this.ensureUnitAliasConfigFile();
+    const configPath = normalizePath(UNIT_ALIAS_CONFIG_PATH);
+    try {
+      if (typeof this.app.openWithDefaultApp === "function") {
+        await this.app.openWithDefaultApp(configPath);
+        return;
+      }
+      if (typeof this.app.showInFolder === "function") {
+        await this.app.showInFolder(configPath);
+        return;
+      }
+    } catch (error) {
+      console.error("[weekly-meal-shopper] Failed to open unit alias config:", error);
+    }
+    new Notice(`Edit unit aliases at: ${configPath}`);
+  }
+
   async loadUnitAliasConfig() {
     await this.ensureUnitAliasConfigFile();
     const configPath = normalizePath(UNIT_ALIAS_CONFIG_PATH);
@@ -6070,19 +7550,24 @@ class WeeklyMealShopperPlugin extends Plugin {
       }
       if (!(file instanceof TFile) || file.extension !== "md") continue;
       if (!this.isRecipeFile(file)) continue;
-      const existing = recipes.get(file.path);
-      if (existing) {
-        if (entry.section === "project") existing.projectCount += 1;
-        else if (entry.section === "hosting") existing.hostingCount += 1;
-        else existing.defaultCount += 1;
-      } else {
-        recipes.set(file.path, {
+      let existing = recipes.get(file.path);
+      if (!existing) {
+        existing = {
           file,
-          defaultCount: entry.section === "default" ? 1 : 0,
-          projectCount: entry.section === "project" ? 1 : 0,
-          hostingCount: entry.section === "hosting" ? 1 : 0,
-        });
+          defaultCount: 0,
+          projectCount: 0,
+          hostingCount: 0,
+          // Card count contributed by each source canvas, used to split the
+          // ingredient list per canvas when splitShoppingListByCanvas is on.
+          cardsByCanvas: new Map(),
+        };
+        recipes.set(file.path, existing);
       }
+      if (entry.section === "project") existing.projectCount += 1;
+      else if (entry.section === "hosting") existing.hostingCount += 1;
+      else existing.defaultCount += 1;
+      const canvasPath = entry.sourceCanvas?.path || "";
+      existing.cardsByCanvas.set(canvasPath, (existing.cardsByCanvas.get(canvasPath) || 0) + 1);
     }
 
     if (recipes.size === 0) {
@@ -6135,7 +7620,45 @@ class WeeklyMealShopperPlugin extends Plugin {
     const projectScaleLines = [];
     const hostingScaleLines = [];
 
-    for (const { file, defaultCount, projectCount, hostingCount } of recipes.values()) {
+    // Per-canvas aggregation only matters when splitting and there is more than
+    // one canvas in play. Each canvas gets its own totals map; a recipe's batches
+    // are attributed to a canvas in proportion to how many of its cards live there.
+    const splitByCanvas = this.settings.splitShoppingListByCanvas === true && canvasFiles.length > 1;
+    const totalsByCanvas = new Map();
+
+    // Adds one parsed ingredient * batches into a totals map under the shared
+    // aggregation key, preserving category-locking and recipe attribution.
+    const accumulateContribution = (targetTotals, item, displayName, classified, categoryLocked, batches, filePath) => {
+      if (!(batches > 0)) return;
+      const category = classified.category;
+      const aggName = normalizedAggregationName(displayName) || item.canonicalName;
+      const key = `${aggName}::${item.unitMetric}::${item.quantityUnknown ? "unknown" : "known"}`;
+      const existing = targetTotals.get(key) || {
+        name: displayName,
+        unit: item.unitMetric,
+        amount: 0,
+        quantityUnknown: false,
+        recipes: new Set(),
+        category,
+        categoryLocked,
+        categoryReason: classified.reason,
+      };
+      existing.amount += item.amountMetric * batches;
+      existing.quantityUnknown = existing.quantityUnknown || !!item.quantityUnknown;
+      existing.recipes.add(filePath);
+      if (!existing.categoryReason && classified.reason) existing.categoryReason = classified.reason;
+      if (categoryLocked) {
+        existing.category = category;
+        existing.categoryLocked = true;
+        existing.categoryReason = "manual override";
+      } else if ((!existing.category || existing.category === "Other") && category !== "Other") {
+        existing.category = category;
+        existing.categoryReason = classified.reason;
+      }
+      targetTotals.set(key, existing);
+    };
+
+    for (const { file, defaultCount, projectCount, hostingCount, cardsByCanvas } of recipes.values()) {
       const profile = this.getRecipePlanningProfile(file, defaultCount);
       let ingredients = [];
       try {
@@ -6177,6 +7700,26 @@ class WeeklyMealShopperPlugin extends Plugin {
       }
 
       if (totalBatches === 0) continue;
+
+      // Work out each canvas's share of this recipe's batches. A recipe that
+      // only appears on one canvas attributes all of its batches there (exact);
+      // one spanning both splits proportionally to its card counts.
+      const canvasShares = [];
+      if (splitByCanvas && cardsByCanvas instanceof Map && cardsByCanvas.size > 0) {
+        let totalCards = 0;
+        for (const count of cardsByCanvas.values()) totalCards += count;
+        if (totalCards > 0) {
+          for (const [canvasPath, count] of cardsByCanvas) {
+            let canvasTotals = totalsByCanvas.get(canvasPath);
+            if (!canvasTotals) {
+              canvasTotals = new Map();
+              totalsByCanvas.set(canvasPath, canvasTotals);
+            }
+            canvasShares.push({ totals: canvasTotals, batches: totalBatches * (count / totalCards) });
+          }
+        }
+      }
+
       for (const item of ingredients) {
         const displayName = normalizeShoppingDisplayName(stripPreparationPhrases(item.name));
         if (shouldExcludeIngredientExact(displayName, exactExclusions)) continue;
@@ -6186,168 +7729,44 @@ class WeeklyMealShopperPlugin extends Plugin {
         const classified = overrideCategory
           ? { category: overrideCategory, reason: "manual override" }
           : classifyIngredientCategoryWithReason(displayName, categoryConfig);
-        const category = classified.category;
-        const aggName = normalizedAggregationName(displayName) || item.canonicalName;
-        const key = `${aggName}::${item.unitMetric}::${item.quantityUnknown ? "unknown" : "known"}`;
-        const existing = totals.get(key) || {
-          name: displayName,
-          unit: item.unitMetric,
-          amount: 0,
-          quantityUnknown: false,
-          recipes: new Set(),
-          category,
-          categoryLocked,
-          categoryReason: classified.reason,
-        };
-        existing.amount += item.amountMetric * totalBatches;
-        existing.quantityUnknown = existing.quantityUnknown || !!item.quantityUnknown;
-        existing.recipes.add(file.path);
-        if (!existing.categoryReason && classified.reason) existing.categoryReason = classified.reason;
-        if (categoryLocked) {
-          existing.category = category;
-          existing.categoryLocked = true;
-          existing.categoryReason = "manual override";
-        } else if ((!existing.category || existing.category === "Other") && category !== "Other") {
-          existing.category = category;
-          existing.categoryReason = classified.reason;
+
+        accumulateContribution(totals, item, displayName, classified, categoryLocked, totalBatches, file.path);
+        for (const share of canvasShares) {
+          accumulateContribution(share.totals, item, displayName, classified, categoryLocked, share.batches, file.path);
         }
-        totals.set(key, existing);
       }
     }
 
-    const rawItems = [...totals.values()].sort((a, b) => a.name.localeCompare(b.name));
-    const garlicItems = [];
-    const citrusRollup = new Map();
-    const totalItems = [];
+    const checklistOptions = {
+      categoryConfig,
+      ingredientOverrides,
+      includeRecipeUsage: this.settings.showRecipeUsageInShoppingList !== false,
+      includeOverrideLinks: this.settings.includeOverrideLinksInShoppingList === true,
+      legumeMode: this.settings.legumeShoppingMode === "dried" ? "dried" : "canned",
+      legumeFactors: resolveLegumeFactors(this.settings),
+    };
+    const emptyChecklistText = "- [ ] (No ingredients needed (covered by frozen leftovers))";
 
-    for (const item of rawItems) {
-      const displayName = normalizeShoppingDisplayName(stripPreparationPhrases(item.name));
-      const normalizedDisplayName = normalizeSearchText(displayName);
-      const citrusKey = detectCitrusKey(displayName);
-      const garlicCandidate = isGarlicRollupCandidate(displayName) && !item.quantityUnknown && ["ml", "unit"].includes(item.unit);
+    // Combined list is always produced (used directly when not splitting, and
+    // for the summary count either way).
+    const combinedChecklistLines = buildGroupedShoppingChecklistLines(totals, checklistOptions);
 
-      if (garlicCandidate) {
-        garlicItems.push({
-          ...item,
-          name: displayName,
-        });
-        continue;
+    let shoppingChecklistBlock;
+    if (splitByCanvas) {
+      const sectionBlocks = [];
+      for (const canvasFile of canvasFiles) {
+        const canvasTotals = totalsByCanvas.get(canvasFile.path) || new Map();
+        const lines = buildGroupedShoppingChecklistLines(canvasTotals, checklistOptions);
+        sectionBlocks.push(`### ${canvasFile.basename}`);
+        sectionBlocks.push(lines.join("\n") || emptyChecklistText);
+        sectionBlocks.push("");
       }
-
-      if (!citrusKey) {
-        if (item.quantityUnknown) {
-          totalItems.push({
-            ...item,
-            name: displayName,
-            unit: "",
-            amount: 0,
-            quantityUnknown: true,
-          });
-          continue;
-        }
-        const adjustedAmount =
-          item.unit === "unit" && shouldRoundUpUnitItem(displayName)
-            ? Math.ceil(item.amount)
-            : item.amount;
-        const override = ingredientOverrides.get(displayName);
-        let converted = convertBaseAmountToPreferredUnit(adjustedAmount, item.unit, override?.unit || "");
-        // If still showing raw ml, humanize to weight or volume units
-        if (converted.unit === "ml") {
-          const humanized = humanizeVolumeUnit(converted.amount, "ml", displayName);
-          converted = { amount: humanized.amount, unit: humanized.unit };
-        }
-        totalItems.push({
-          ...item,
-          name: displayName,
-          amount: converted.amount,
-          unit: converted.unit,
-        });
-        continue;
-      }
-
-      const citrus = citrusRollup.get(citrusKey) || {
-        key: citrusKey,
-        category: item.category || "Fresh Fruit and Vegetables",
-        wholeFromJuice: 0,
-        wholeExplicit: 0,
-        recipes: new Set(),
-      };
-
-      const recipeEntries = item.recipes && typeof item.recipes[Symbol.iterator] === "function"
-        ? item.recipes
-        : [];
-      for (const recipe of recipeEntries) citrus.recipes.add(recipe);
-
-      if (/\bjuice\b/.test(normalizedDisplayName)) {
-        citrus.wholeFromJuice += estimateCitrusUnitsFromJuice(item, citrusKey);
-      } else if (/\b(wedge|wedges|rind|zest|peel|segments?)\b/.test(normalizedDisplayName)) {
-        citrus.wholeExplicit += Math.max(1, item.amount);
-      } else if (item.unit === "unit") {
-        citrus.wholeExplicit += item.amount;
-      } else {
-        const adjustedAmount =
-          item.unit === "unit" && shouldRoundUpUnitItem(displayName)
-            ? Math.ceil(item.amount)
-            : item.amount;
-        totalItems.push({
-          ...item,
-          name: displayName,
-          amount: adjustedAmount,
-        });
-      }
-
-      citrusRollup.set(citrusKey, citrus);
+      shoppingChecklistBlock = sectionBlocks.join("\n").replace(/\n+$/, "");
+    } else {
+      shoppingChecklistBlock = combinedChecklistLines.join("\n") || emptyChecklistText;
     }
 
-    const garlicRollupItem = buildGarlicRollupItem(garlicItems);
-    if (garlicRollupItem) totalItems.push(garlicRollupItem);
-
-    for (const citrus of citrusRollup.values()) {
-      const rule = CITRUS_RULES[citrus.key];
-      const neededWhole = Math.max(citrus.wholeFromJuice, citrus.wholeExplicit);
-      const roundedWhole = Math.max(1, Math.ceil(neededWhole));
-      const singular = rule.singular;
-      const plural = rule.plural;
-      totalItems.push({
-        name: roundedWhole === 1 ? singular : plural,
-        unit: "unit",
-        amount: roundedWhole,
-        recipes: citrus.recipes,
-        category: citrus.category || "Fresh Fruit and Vegetables",
-        categoryReason: "citrus rollup",
-      });
-    }
-
-    const categoryOrder = Array.isArray(categoryConfig.categoryOrder) && categoryConfig.categoryOrder.length
-      ? categoryConfig.categoryOrder
-      : SHOPPING_CATEGORY_ORDER;
-    const grouped = new Map();
-    const orderedCategories = [...categoryOrder];
-    for (const category of orderedCategories) grouped.set(category, []);
-    for (const item of totalItems) {
-      const category = String(item.category || categoryConfig.defaultCategory || "Other");
-      if (!grouped.has(category)) {
-        grouped.set(category, []);
-        orderedCategories.push(category);
-      }
-      grouped.get(category).push(item);
-    }
-
-    const groupedIngredientLines = [];
-    for (const category of orderedCategories) {
-      const items = grouped.get(category) || [];
-      if (items.length === 0) continue;
-      groupedIngredientLines.push(`- ${category}`);
-      const noAmountCategory =
-        category === "Spices and Seasoning" || category === "Herbs, Spices and Seasonings";
-      for (const item of items) {
-        groupedIngredientLines.push(...formatShoppingListItemLines(item, {
-          includeRecipeUsage: this.settings.showRecipeUsageInShoppingList !== false,
-          includeOverrideLinks: this.settings.includeOverrideLinksInShoppingList === true,
-          noAmountCategory,
-        }));
-      }
-    }
+    const aggregatedItemCount = combinedChecklistLines.filter((line) => /^\s*-\s\[ \]/.test(line)).length;
 
     const generated = [
       "# Weekly Shopping List",
@@ -6368,7 +7787,7 @@ class WeeklyMealShopperPlugin extends Plugin {
       hostingScaleLines.join("\n") || "- None",
       "",
       "## Shopping Checklist",
-      groupedIngredientLines.join("\n") || "- [ ] (No ingredients needed (covered by frozen leftovers))",
+      shoppingChecklistBlock,
       "",
     ].join("\n");
 
@@ -6388,7 +7807,7 @@ class WeeklyMealShopperPlugin extends Plugin {
       return;
     }
 
-    new Notice(`Shopping list created with ${totalItems.length} aggregated ingredients.`);
+    new Notice(`Shopping list created with ${aggregatedItemCount} aggregated ingredients.`);
   }
 }
 
@@ -6530,6 +7949,59 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.parsedIngredientsField)
           .onChange(async (value) => {
             this.plugin.settings.parsedIngredientsField = value.trim() || "IngredientsParsed";
+            await this.plugin.saveSettings();
+          })
+      );
+
+    const { body: recipeCardBody } = this.buildFoldableSection(containerEl, {
+      stateKey: "recipeCardCollapsed",
+      title: "Recipe card view",
+      description: "Settings for the planning modal — two-column layout, fractions, component recipes.",
+    });
+
+    new Setting(recipeCardBody)
+      .setName("Side column regex")
+      .setDesc("Headings matching this pattern go to the ingredients/side column.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Ingredients|Nutrition")
+          .setValue(this.plugin.settings.recipeCardSideColumnRegex)
+          .onChange(async (value) => {
+            this.plugin.settings.recipeCardSideColumnRegex = value.trim() || DEFAULT_SETTINGS.recipeCardSideColumnRegex;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(recipeCardBody)
+      .setName("Treat H1 as card title")
+      .setDesc("Use the first H1 heading as the card title and omit it from the content.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.recipeCardTreatH1AsFilename).onChange(async (value) => {
+          this.plugin.settings.recipeCardTreatH1AsFilename = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(recipeCardBody)
+      .setName("Render unicode fractions")
+      .setDesc("Replace 1/2, 1/4 etc. with ½, ¼ in the card view.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.recipeCardRenderUnicodeFractions).onChange(async (value) => {
+          this.plugin.settings.recipeCardRenderUnicodeFractions = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(recipeCardBody)
+      .setName("Single-column breakpoint (px)")
+      .setDesc("Below this width the card stacks into one column.")
+      .addSlider((slider) =>
+        slider
+          .setLimits(300, 1400, 10)
+          .setDynamicTooltip()
+          .setValue(this.plugin.settings.recipeCardSingleColumnMaxWidth)
+          .onChange(async (value) => {
+            this.plugin.settings.recipeCardSingleColumnMaxWidth = value;
             await this.plugin.saveSettings();
           })
       );
@@ -6776,6 +8248,8 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     this.renderShoppingCategoriesSection(containerEl, categoryConfig);
     this.renderExcludedIngredientsSection(containerEl, categories);
     this.renderIngredientOverridesSection(containerEl, categories, categoryConfig.defaultCategory);
+    this.renderUnitAliasesSection(containerEl);
+    this.renderLegumeSettingsSection(containerEl);
 
     this.renderCategoryHeading(containerEl, {
       title: "First-Time Setup",
@@ -6810,6 +8284,32 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.weeklyCanvasPath2 || "")
           .onChange(async (value) => {
             this.plugin.settings.weeklyCanvasPath2 = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(firstTimeSetupBody)
+      .setName("Split shopping list by canvas")
+      .setDesc("When using two canvases, output a separate shopping checklist for each canvas (one per prep session) instead of a single merged list. Has no effect with a single canvas.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.splitShoppingListByCanvas === true)
+          .onChange(async (value) => {
+            this.plugin.settings.splitShoppingListByCanvas = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(firstTimeSetupBody)
+      .setName("Frozen staleness warning (days)")
+      .setDesc("In 'Manage frozen portions', flag any recipe whose frozen portions were last updated more than this many days ago. Set to 0 to disable.")
+      .addText((text) =>
+        text
+          .setPlaceholder("90")
+          .setValue(String(parseNumberLike(this.plugin.settings.frozenStaleWarningDays, 90)))
+          .onChange(async (value) => {
+            const parsed = parseNumberLike(value, 90);
+            this.plugin.settings.frozenStaleWarningDays = Math.max(0, parsed);
             await this.plugin.saveSettings();
           })
       );
@@ -6886,6 +8386,99 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           );
         })
       );
+  }
+
+  renderUnitAliasesSection(containerEl) {
+    const { body } = this.buildFoldableSection(containerEl, {
+      title: "Unit aliases",
+      description: "Extra spellings recognized for cup, tbsp, and tsp. Built-in aliases are always active; add your own in unit-aliases.json.",
+    });
+
+    const list = body.createDiv({ cls: "weekly-meal-shopper-entry-list" });
+    for (const { unit, builtIn, custom } of buildUnitAliasSummary(ACTIVE_EXTRA_UNIT_ALIASES)) {
+      const row = list.createDiv({ cls: "weekly-meal-shopper-entry-row" });
+      row.createSpan({ cls: "weekly-meal-shopper-heading-title", text: unit });
+      row.createDiv({ text: `Built-in: ${builtIn.join(", ")}` });
+      row.createDiv({ text: custom.length ? `Custom: ${custom.join(", ")}` : "Custom: (none)" });
+    }
+
+    new Setting(body)
+      .setName("unit-aliases.json")
+      .setDesc("Add custom aliases under the cup, tbsp, or tsp arrays, then reload to apply.")
+      .addButton((btn) =>
+        btn.setButtonText("Edit file").onClick(async () => {
+          await this.plugin.revealUnitAliasConfigFile();
+        })
+      )
+      .addButton((btn) =>
+        btn.setButtonText("Reload aliases").onClick(async () => {
+          await this.plugin.loadUnitAliasConfig();
+          new Notice("Unit aliases reloaded.");
+          await this.display();
+        })
+      );
+  }
+
+  renderLegumeSettingsSection(containerEl) {
+    const { body, searchInput } = this.buildFoldableSection(containerEl, {
+      title: "Dried legumes",
+      description: "Buy legumes dried for cooking from scratch, and tune the canned→dried conversion factors.",
+      searchPlaceholder: "Search legume settings",
+    });
+
+    const rows = [];
+    const addRow = (configure) => {
+      const setting = new Setting(body);
+      configure(setting);
+      rows.push(setting);
+    };
+
+    addRow((setting) =>
+      setting
+        .setName("Buy legumes dried (cook from scratch)")
+        .setDesc("Convert canned/cooked legumes (chickpeas, beans, lentils, …) to dried weights. Shopping list shows grams + an ml storage readout; recipe view shows grams only. Off keeps cans.")
+        .addToggle((toggle) =>
+          toggle
+            .setValue(this.plugin.settings.legumeShoppingMode === "dried")
+            .onChange(async (value) => {
+              this.plugin.settings.legumeShoppingMode = value ? "dried" : "canned";
+              await this.plugin.saveSettings();
+            })
+        )
+    );
+
+    const numberRow = (name, desc, key, fallback, placeholder) =>
+      addRow((setting) =>
+        setting
+          .setName(name)
+          .setDesc(desc)
+          .addText((text) =>
+            text
+              .setPlaceholder(placeholder)
+              .setValue(String(positiveNumberOr(this.plugin.settings[key], fallback)))
+              .onChange(async (value) => {
+                this.plugin.settings[key] = positiveNumberOr(value, fallback);
+                await this.plugin.saveSettings();
+              })
+          )
+      );
+
+    numberRow("Dried grams per can", "Dried-bean weight equivalent to one ~400 g can (used when a recipe counts cans).", "legumeGramsDriedPerCan", 85, "85");
+    numberRow("Cooked → dried factor", "Multiply an explicit cooked/canned weight by this to estimate the dried weight.", "legumeCookedToDriedFactor", 0.4, "0.4");
+    numberRow("Dried density (g per ml)", "Bulk density used to show the storage volume (ml) alongside grams on the shopping list.", "driedLegumeDensityGPerMl", 0.8, "0.8");
+
+    if (searchInput) {
+      const applyFilter = () => {
+        const query = normalizeSearchText(searchInput.value || "");
+        for (const setting of rows) {
+          const el = setting.settingEl;
+          if (!el) continue;
+          const haystack = normalizeSearchText(el.textContent || "");
+          el.style.display = !query || haystack.includes(query) ? "" : "none";
+        }
+      };
+      searchInput.addEventListener("input", applyFilter);
+    }
   }
 
   renderShoppingCategoriesSection(containerEl, categoryConfig) {

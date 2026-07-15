@@ -1,9 +1,11 @@
 {
   "id": "weekly-meal-shopper",
   "name": "Weekly Meal Shopper",
-  "version": "0.3.0",
-  "minAppVersion": "0.15.0",
-  "description": "Standardize recipe notes, parse ingredient amounts, and generate weekly shopping lists from a meal-plan canvas.",
-  "author": "Antoine + Codex",
+  "version": "0.4.0",
+  "minAppVersion": "1.0.0",
+  "description": "Plan weekly meals on a canvas, transcribe recipes from URLs and images with AI, and generate categorised shopping lists.",
+  "author": "Antoine Jhaddad",
+  "authorUrl": "https://antoinejhaddad.com",
+  "fundingUrl": "https://buymeacoffee.com/tonyhad",
   "isDesktopOnly": false
 }

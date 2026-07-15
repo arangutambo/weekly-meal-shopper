@@ -46,8 +46,8 @@ test("image folder transcription saves every recipe returned for a single image"
   assert.equal(
     JSON.stringify(saved.map((entry) => entry.options)),
     JSON.stringify([
-      { openFile: false, useOpenAIStandardization: true },
-      { openFile: false, useOpenAIStandardization: true },
+      { openFile: false, useOpenAIStandardization: true, showReview: true },
+      { openFile: false, useOpenAIStandardization: true, showReview: true },
     ])
   );
 });
