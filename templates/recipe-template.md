@@ -13,6 +13,7 @@ WeekDay: false
 PortionsPerMeal: 1
 FrozenPortionsAvailable: 0
 UseFrozenFirst: true
+TrackMacros: false
 type: Recipe
 FoodType: Meal Item
 Collection: []

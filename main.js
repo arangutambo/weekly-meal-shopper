@@ -59,6 +59,13 @@ const DEFAULT_SETTINGS = {
   recipeCardTreatH1AsFilename: false,
   recipeCardRenderUnicodeFractions: true,
   recipeCardSingleColumnMaxWidth: 760,
+  // Macronutrient tracking (opt-in globally, then per-recipe via TrackMacros).
+  macrosEnabled: false,
+  energyUnit: "kcal", // "kcal" | "kJ" — independent of measurementPreference/measurementPreset
+  nutritionDatabasePath: "", // "" = use the bundled nutrition-database.json
+  // Household members for family/multi-person meal planning. Plain name
+  // strings, used only for autocomplete/labeling convenience — never a gate.
+  familyMembers: [],
   settingsSectionState: {
     firstTimeSetupCollapsed: false,
     mealPrepSetupCollapsed: false,
@@ -69,6 +76,8 @@ const DEFAULT_SETTINGS = {
     shoppingCategoriesCollapsed: false,
     excludeIngredientsCollapsed: false,
     ingredientOverridesCollapsed: false,
+    nutritionSectionCollapsed: false,
+    familySectionCollapsed: false,
   },
 };
 
@@ -94,6 +103,7 @@ WeekDay: false
 PortionsPerMeal: 1
 FrozenPortionsAvailable: 0
 UseFrozenFirst: true
+TrackMacros: false
 type: Recipe
 FoodType: Meal Item
 Collection: []
@@ -175,6 +185,7 @@ function getIsoWeekInfo(inputDate = new Date()) {
 
 const UNIT_DENSITY_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/unit-density-rules.json";
 const UNIT_ALIAS_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/unit-aliases.json";
+const NUTRITION_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/nutrition-database.json";
 
 const FRACTIONS = {
   "½": 0.5,
@@ -406,6 +417,170 @@ const WEIGHT_DENSITY_G_PER_ML = {
 const DEFAULT_UNIT_DENSITY_CONFIG = {
   densities: WEIGHT_DENSITY_G_PER_ML,
 };
+
+// Approximate per-100g macronutrient values (kcal, protein/carbs/fat in grams),
+// sourced from public USDA FoodData Central figures. Not medical-grade —
+// intended for recipe planning, not clinical dietary tracking. `gramsPerUnit`
+// is optional and only present on ingredients commonly measured by count
+// (e.g. "2 eggs"), used to convert a unit-based ingredient line to grams
+// before looking up its per-100g macros.
+const DEFAULT_NUTRITION_CONFIG = {
+  source: "USDA FoodData Central (public domain), approximate per-100g values",
+  entries: {
+    // Protein
+    "chicken breast": { kcal: 165, protein: 31, carbs: 0, fat: 3.6 },
+    "chicken thigh": { kcal: 209, protein: 26, carbs: 0, fat: 10.9 },
+    "ground beef": { kcal: 250, protein: 26, carbs: 0, fat: 15 },
+    "beef steak": { kcal: 271, protein: 25, carbs: 0, fat: 19 },
+    "pork chop": { kcal: 231, protein: 23, carbs: 0, fat: 14 },
+    "bacon": { kcal: 541, protein: 37, carbs: 1.4, fat: 42 },
+    "salmon": { kcal: 208, protein: 20, carbs: 0, fat: 13 },
+    "tuna": { kcal: 116, protein: 26, carbs: 0, fat: 0.8 },
+    "shrimp": { kcal: 99, protein: 24, carbs: 0.2, fat: 0.3 },
+    "egg": { kcal: 143, protein: 12.6, carbs: 0.7, fat: 9.5, gramsPerUnit: 50 },
+    "tofu": { kcal: 76, protein: 8, carbs: 1.9, fat: 4.8 },
+    "tempeh": { kcal: 192, protein: 20, carbs: 7.6, fat: 11 },
+
+    // Dairy
+    "whole milk": { kcal: 61, protein: 3.2, carbs: 4.8, fat: 3.3 },
+    "skim milk": { kcal: 34, protein: 3.4, carbs: 5, fat: 0.1 },
+    "plain yogurt": { kcal: 61, protein: 3.5, carbs: 4.7, fat: 3.3 },
+    "greek yogurt": { kcal: 97, protein: 9, carbs: 4, fat: 5 },
+    "cheddar cheese": { kcal: 403, protein: 25, carbs: 1.3, fat: 33 },
+    "mozzarella cheese": { kcal: 280, protein: 22, carbs: 2.2, fat: 22 },
+    "parmesan cheese": { kcal: 392, protein: 35.8, carbs: 3.2, fat: 25.8 },
+    "feta cheese": { kcal: 264, protein: 14.2, carbs: 4.1, fat: 21.3 },
+    "cream cheese": { kcal: 342, protein: 6, carbs: 4, fat: 34 },
+    "butter": { kcal: 717, protein: 0.9, carbs: 0.1, fat: 81 },
+    "sour cream": { kcal: 198, protein: 2.4, carbs: 4.6, fat: 19.4 },
+    "heavy cream": { kcal: 340, protein: 2.1, carbs: 2.8, fat: 36 },
+    "cottage cheese": { kcal: 98, protein: 11, carbs: 3.4, fat: 4.3 },
+
+    // Grains / starches
+    "white rice": { kcal: 130, protein: 2.7, carbs: 28.2, fat: 0.3 },
+    "brown rice": { kcal: 123, protein: 2.6, carbs: 25.6, fat: 1 },
+    "quinoa": { kcal: 120, protein: 4.4, carbs: 21.3, fat: 1.9 },
+    "pasta": { kcal: 131, protein: 5, carbs: 25, fat: 1.1 },
+    "white bread": { kcal: 265, protein: 9, carbs: 49, fat: 3.2 },
+    "whole wheat bread": { kcal: 247, protein: 13, carbs: 41, fat: 3.4 },
+    "all-purpose flour": { kcal: 364, protein: 10.3, carbs: 76.3, fat: 1 },
+    "whole wheat flour": { kcal: 340, protein: 13.7, carbs: 72, fat: 2.5 },
+    "oats": { kcal: 389, protein: 16.9, carbs: 66.3, fat: 6.9 },
+    "couscous": { kcal: 112, protein: 3.8, carbs: 23.2, fat: 0.2 },
+    "corn tortilla": { kcal: 218, protein: 5.7, carbs: 44.9, fat: 2.9 },
+    "cornmeal": { kcal: 370, protein: 8, carbs: 79, fat: 3.9 },
+
+    // Legumes
+    "chickpeas": { kcal: 139, protein: 7.9, carbs: 22.9, fat: 2.6 },
+    "black beans": { kcal: 132, protein: 8.9, carbs: 23.7, fat: 0.5 },
+    "kidney beans": { kcal: 127, protein: 8.7, carbs: 22.8, fat: 0.5 },
+    "lentils": { kcal: 116, protein: 9, carbs: 20.1, fat: 0.4 },
+    "split peas": { kcal: 118, protein: 8.3, carbs: 21.1, fat: 0.4 },
+    "edamame": { kcal: 121, protein: 11.9, carbs: 8.9, fat: 5.2 },
+    "soybeans": { kcal: 173, protein: 16.6, carbs: 9.9, fat: 9 },
+
+    // Vegetables
+    "onion": { kcal: 40, protein: 1.1, carbs: 9.3, fat: 0.1, gramsPerUnit: 110 },
+    "garlic": { kcal: 149, protein: 6.4, carbs: 33.1, fat: 0.5, gramsPerUnit: 3 },
+    "tomato": { kcal: 18, protein: 0.9, carbs: 3.9, fat: 0.2, gramsPerUnit: 123 },
+    "potato": { kcal: 77, protein: 2, carbs: 17, fat: 0.1, gramsPerUnit: 173 },
+    "sweet potato": { kcal: 86, protein: 1.6, carbs: 20.1, fat: 0.1, gramsPerUnit: 130 },
+    "carrot": { kcal: 41, protein: 0.9, carbs: 9.6, fat: 0.2, gramsPerUnit: 61 },
+    "broccoli": { kcal: 34, protein: 2.8, carbs: 6.6, fat: 0.4 },
+    "spinach": { kcal: 23, protein: 2.9, carbs: 3.6, fat: 0.4 },
+    "kale": { kcal: 49, protein: 4.3, carbs: 8.8, fat: 0.9 },
+    "bell pepper": { kcal: 31, protein: 1, carbs: 6, fat: 0.3, gramsPerUnit: 119 },
+    "cucumber": { kcal: 15, protein: 0.7, carbs: 3.6, fat: 0.1 },
+    "zucchini": { kcal: 17, protein: 1.2, carbs: 3.1, fat: 0.3 },
+    "mushrooms": { kcal: 22, protein: 3.1, carbs: 3.3, fat: 0.3 },
+    "cauliflower": { kcal: 25, protein: 1.9, carbs: 5, fat: 0.3 },
+    "green beans": { kcal: 31, protein: 1.8, carbs: 7, fat: 0.2 },
+    "corn": { kcal: 96, protein: 3.4, carbs: 21, fat: 1.5 },
+    "peas": { kcal: 81, protein: 5.4, carbs: 14.5, fat: 0.4 },
+    "celery": { kcal: 16, protein: 0.7, carbs: 3, fat: 0.2 },
+    "eggplant": { kcal: 25, protein: 1, carbs: 6, fat: 0.2 },
+    "cabbage": { kcal: 25, protein: 1.3, carbs: 5.8, fat: 0.1 },
+    "lettuce": { kcal: 17, protein: 1.2, carbs: 3.3, fat: 0.3 },
+    "avocado": { kcal: 160, protein: 2, carbs: 8.5, fat: 14.7, gramsPerUnit: 200 },
+    "pumpkin": { kcal: 26, protein: 1, carbs: 6.5, fat: 0.1 },
+    "beetroot": { kcal: 43, protein: 1.6, carbs: 9.6, fat: 0.2 },
+    "asparagus": { kcal: 20, protein: 2.2, carbs: 3.9, fat: 0.1 },
+    "brussels sprouts": { kcal: 43, protein: 3.4, carbs: 8.9, fat: 0.3 },
+    "leek": { kcal: 61, protein: 1.5, carbs: 14.2, fat: 0.3 },
+    "ginger": { kcal: 80, protein: 1.8, carbs: 17.8, fat: 0.8 },
+    "scallion": { kcal: 32, protein: 1.8, carbs: 7.3, fat: 0.2 },
+
+    // Fruit
+    "banana": { kcal: 89, protein: 1.1, carbs: 22.8, fat: 0.3, gramsPerUnit: 118 },
+    "apple": { kcal: 52, protein: 0.3, carbs: 13.8, fat: 0.2, gramsPerUnit: 182 },
+    "orange": { kcal: 47, protein: 0.9, carbs: 11.8, fat: 0.1, gramsPerUnit: 131 },
+    "lemon": { kcal: 29, protein: 1.1, carbs: 9.3, fat: 0.3, gramsPerUnit: 58 },
+    "lime": { kcal: 30, protein: 0.7, carbs: 10.5, fat: 0.2, gramsPerUnit: 67 },
+    "strawberries": { kcal: 32, protein: 0.7, carbs: 7.7, fat: 0.3 },
+    "blueberries": { kcal: 57, protein: 0.7, carbs: 14.5, fat: 0.3 },
+    "grapes": { kcal: 69, protein: 0.7, carbs: 18.1, fat: 0.2 },
+    "mango": { kcal: 60, protein: 0.8, carbs: 15, fat: 0.4 },
+    "pineapple": { kcal: 50, protein: 0.5, carbs: 13.1, fat: 0.1 },
+    "watermelon": { kcal: 30, protein: 0.6, carbs: 7.6, fat: 0.2 },
+    "raisins": { kcal: 299, protein: 3.1, carbs: 79.2, fat: 0.5 },
+    "dates": { kcal: 277, protein: 1.8, carbs: 75, fat: 0.2 },
+
+    // Nuts, seeds, oils
+    "olive oil": { kcal: 884, protein: 0, carbs: 0, fat: 100 },
+    "vegetable oil": { kcal: 884, protein: 0, carbs: 0, fat: 100 },
+    "coconut oil": { kcal: 892, protein: 0, carbs: 0, fat: 99 },
+    "sesame oil": { kcal: 884, protein: 0, carbs: 0, fat: 100 },
+    "almonds": { kcal: 579, protein: 21.2, carbs: 21.6, fat: 49.9 },
+    "walnuts": { kcal: 654, protein: 15.2, carbs: 13.7, fat: 65.2 },
+    "cashews": { kcal: 553, protein: 18.2, carbs: 30.2, fat: 43.9 },
+    "peanuts": { kcal: 567, protein: 25.8, carbs: 16.1, fat: 49.2 },
+    "peanut butter": { kcal: 588, protein: 25, carbs: 20, fat: 50 },
+    "tahini": { kcal: 595, protein: 17, carbs: 21, fat: 53.8 },
+    "chia seeds": { kcal: 486, protein: 16.5, carbs: 42.1, fat: 30.7 },
+    "flaxseeds": { kcal: 534, protein: 18.3, carbs: 28.9, fat: 42.2 },
+    "sunflower seeds": { kcal: 584, protein: 20.8, carbs: 20, fat: 51.5 },
+    "pumpkin seeds": { kcal: 559, protein: 30.2, carbs: 10.7, fat: 49 },
+
+    // Plant milks / canned
+    "almond milk": { kcal: 17, protein: 0.6, carbs: 0.6, fat: 1.2 },
+    "soy milk": { kcal: 33, protein: 2.9, carbs: 1.8, fat: 1.6 },
+    "oat milk": { kcal: 47, protein: 1, carbs: 7.5, fat: 1.5 },
+    "coconut milk": { kcal: 230, protein: 2.3, carbs: 5.5, fat: 24 },
+    "coconut cream": { kcal: 330, protein: 3.6, carbs: 6.7, fat: 34.7 },
+
+    // Sweeteners
+    "sugar": { kcal: 387, protein: 0, carbs: 100, fat: 0 },
+    "brown sugar": { kcal: 380, protein: 0, carbs: 98, fat: 0 },
+    "honey": { kcal: 304, protein: 0.3, carbs: 82.4, fat: 0 },
+    "maple syrup": { kcal: 260, protein: 0, carbs: 67, fat: 0.2 },
+
+    // Condiments / misc
+    "ketchup": { kcal: 101, protein: 1.2, carbs: 25.6, fat: 0.1 },
+    "mayonnaise": { kcal: 680, protein: 1, carbs: 0.6, fat: 75 },
+    "mustard": { kcal: 66, protein: 4.4, carbs: 5.8, fat: 3.3 },
+    "tomato paste": { kcal: 82, protein: 4.3, carbs: 18.9, fat: 0.5 },
+    "soy sauce": { kcal: 53, protein: 8, carbs: 4.9, fat: 0.6 },
+    "vinegar": { kcal: 18, protein: 0, carbs: 0.4, fat: 0 },
+    "breadcrumbs": { kcal: 395, protein: 13, carbs: 72, fat: 5.3 },
+    "cornstarch": { kcal: 381, protein: 0.3, carbs: 91.3, fat: 0.1 },
+
+    // Spices / herbs
+    "black pepper": { kcal: 251, protein: 10.4, carbs: 64, fat: 3.3 },
+    "salt": { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+    "cumin": { kcal: 375, protein: 17.8, carbs: 44.2, fat: 22.3 },
+    "paprika": { kcal: 282, protein: 14.1, carbs: 54, fat: 12.9 },
+    "cinnamon": { kcal: 247, protein: 4, carbs: 80.6, fat: 1.2 },
+    "turmeric": { kcal: 312, protein: 9.7, carbs: 67.1, fat: 3.3 },
+    "chili powder": { kcal: 282, protein: 13.5, carbs: 49.7, fat: 14.3 },
+    "oregano": { kcal: 265, protein: 9, carbs: 68.9, fat: 4.3 },
+    "basil": { kcal: 22, protein: 3.2, carbs: 2.6, fat: 0.6 },
+    "parsley": { kcal: 36, protein: 3, carbs: 6.3, fat: 0.8 },
+    "cilantro": { kcal: 23, protein: 2.1, carbs: 3.7, fat: 0.5 },
+    "thyme": { kcal: 101, protein: 5.6, carbs: 24.5, fat: 1.7 },
+    "rosemary": { kcal: 131, protein: 3.3, carbs: 20.7, fat: 5.9 },
+  },
+};
+
 const DEFAULT_UNIT_ALIAS_CONFIG = {
   cup: [],
   tbsp: [],
@@ -491,6 +666,8 @@ let ACTIVE_MEASUREMENT_PROFILE = resolveMeasurementProfile({
 let ACTIVE_UNIT_MAP = buildUnitMapFromProfile(ACTIVE_MEASUREMENT_PROFILE);
 let ACTIVE_MEASUREMENT_PREFERENCE = "weight";
 let ACTIVE_CONVERT_LIQUID_VOLUME_TO_WEIGHT = true;
+let ACTIVE_ENERGY_UNIT = "kcal";
+const KCAL_TO_KJ = 4.184;
 const STRUCTURED_INGREDIENT_SEPARATORS = [";", ",", ":", "|"];
 const DEFAULT_INGREDIENT_STORAGE_SEPARATOR = ";";
 const DEFAULT_RECIPE_VIEW_INGREDIENT_DISPLAY_TEMPLATE = "{{Amount}} {{Unit}} {{Ingredient}}{{PreparationSuffix}}";
@@ -535,6 +712,21 @@ function shouldPreferWeightMeasurements(preference) {
   return pref === "weight" || pref === "both";
 }
 
+// Independent of measurementPreference/measurementPreset — those only affect
+// volume/weight display, this only affects how energy (kcal/kJ) is shown.
+function normalizeEnergyUnit(value) {
+  const unit = normalizeSearchText(value);
+  return unit === "kj" ? "kJ" : "kcal";
+}
+
+// Macro values are always cached in frontmatter as kcal; this is the only
+// place kcal<->kJ conversion happens, applied at render/display time.
+function convertKcalToDisplayEnergy(kcal, unit = ACTIVE_ENERGY_UNIT) {
+  const num = Number(kcal);
+  if (!Number.isFinite(num)) return 0;
+  return normalizeEnergyUnit(unit) === "kJ" ? num * KCAL_TO_KJ : num;
+}
+
 function setActiveMeasurementProfile(settings) {
   ACTIVE_MEASUREMENT_PROFILE = resolveMeasurementProfile(settings);
   ACTIVE_UNIT_MAP = buildUnitMapFromProfile(ACTIVE_MEASUREMENT_PROFILE);
@@ -542,6 +734,7 @@ function setActiveMeasurementProfile(settings) {
   ACTIVE_CONVERT_LIQUID_VOLUME_TO_WEIGHT = settings?.convertLiquidVolumeMeasuresToWeight !== false;
   ACTIVE_LEGUME_SHOPPING_MODE = settings?.legumeShoppingMode === "dried" ? "dried" : "canned";
   ACTIVE_LEGUME_FACTORS = resolveLegumeFactors(settings || {});
+  ACTIVE_ENERGY_UNIT = normalizeEnergyUnit(settings?.energyUnit);
 }
 
 function normalizeUnitAliasConfig(raw) {
@@ -608,6 +801,29 @@ function estimateIngredientDensityGPerMl(name) {
   if (!text) return null;
   for (const [pattern, density] of WEIGHT_DENSITY_ENTRIES) {
     if (text.includes(pattern)) return density;
+  }
+  return null;
+}
+
+// Same canonical-name/substring-matching approach as density lookups, so
+// alias/normalization improvements made for one benefit the other for free.
+function buildNutritionEntries(config) {
+  const entries = config && typeof config === "object" ? config.entries : null;
+  const source = entries && typeof entries === "object" ? entries : DEFAULT_NUTRITION_CONFIG.entries;
+  return Object.entries(source)
+    .map(([pattern, macros]) => [normalizeSearchText(pattern), macros])
+    .filter(([pattern, macros]) => !!pattern && macros && typeof macros === "object" && Number.isFinite(Number(macros.kcal)))
+    .sort((a, b) => b[0].length - a[0].length);
+}
+let NUTRITION_ENTRIES = buildNutritionEntries(DEFAULT_NUTRITION_CONFIG);
+
+// Returns { kcal, protein, carbs, fat, gramsPerUnit? } per 100g, or null if no
+// entry matches. Never guesses — callers must treat null as "no data".
+function estimateIngredientMacrosPer100g(name) {
+  const text = normalizeSearchText(name);
+  if (!text) return null;
+  for (const [pattern, macros] of NUTRITION_ENTRIES) {
+    if (text.includes(pattern)) return macros;
   }
   return null;
 }
@@ -1375,6 +1591,190 @@ function buildRecipeValidationReport(recipeReports, totalRecipes = 0) {
   }
 
   return lines.join("\n").trimEnd() + "\n";
+}
+
+// Replaces the body text between a `### <headingName>` heading and the next
+// `---` divider or heading (whichever comes first) with newBody. Mirrors this
+// template's convention of separating sections with `---` rather than nested
+// heading levels. Returns null if the heading isn't found.
+function replaceMarkdownSectionBody(content, headingName, newBody) {
+  const lines = String(content || "").split(/\r?\n/);
+  const headingRegex = new RegExp(`^#{1,6}\\s+${escapeRegExp(headingName)}\\s*$`, "i");
+  const startIdx = lines.findIndex((line) => headingRegex.test(line.trim()));
+  if (startIdx === -1) return null;
+
+  let endIdx = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (trimmed === "---" || /^#{1,6}\s+/.test(trimmed)) {
+      endIdx = i;
+      break;
+    }
+  }
+
+  const before = lines.slice(0, startIdx + 1);
+  const after = lines.slice(endIdx);
+  const bodyLines = newBody ? String(newBody).split(/\r?\n/) : [""];
+  return [...before, ...bodyLines, "", ...after].join("\n");
+}
+
+// Computes one ingredient line's macro contribution (absolute, not yet
+// divided by servings). Returns { kcal, protein, carbs, fat } on success, or
+// null while pushing a finding ({ severity, type, message }, same shape as
+// validateRecipeData's findings) onto the optional findings array — missing
+// data is surfaced, never silently guessed.
+function computeIngredientMacroContribution(item, findings = []) {
+  const name = item?.name || "";
+  if (item?.quantityUnknown) {
+    findings.push({ severity: "warning", type: "unknown-quantity", message: `Amount unknown for "${name}" — excluded from macro totals.` });
+    return null;
+  }
+
+  const macros = estimateIngredientMacrosPer100g(name);
+  if (!macros) {
+    findings.push({ severity: "warning", type: "no-nutrition-data", message: `No nutrition data for "${name}".` });
+    return null;
+  }
+
+  let grams = 0;
+  if (item.unitMetric === "g") {
+    grams = Number(item.amountMetric) || 0;
+  } else if (item.unitMetric === "ml") {
+    const density = estimateIngredientDensityGPerMl(name);
+    if (!Number.isFinite(density)) {
+      findings.push({ severity: "warning", type: "no-density-data", message: `No density data to convert "${name}" from ml to grams.` });
+      return null;
+    }
+    grams = (Number(item.amountMetric) || 0) * density;
+  } else if (item.unitMetric === "unit") {
+    const gramsPerUnit = Number(macros.gramsPerUnit);
+    if (!Number.isFinite(gramsPerUnit) || gramsPerUnit <= 0) {
+      findings.push({ severity: "warning", type: "no-unit-weight-data", message: `No per-unit weight for "${name}" — cannot convert count to grams.` });
+      return null;
+    }
+    grams = (Number(item.amountMetric) || 0) * gramsPerUnit;
+  } else {
+    findings.push({ severity: "warning", type: "unsupported-unit", message: `Unsupported unit "${item.unitMetric}" for "${name}".` });
+    return null;
+  }
+
+  const scale = grams / 100;
+  return {
+    kcal: (Number(macros.kcal) || 0) * scale,
+    protein: (Number(macros.protein) || 0) * scale,
+    carbs: (Number(macros.carbs) || 0) * scale,
+    fat: (Number(macros.fat) || 0) * scale,
+  };
+}
+
+// Sums per-ingredient macro contributions across a recipe's ingredients and
+// divides by the number of servings (portions), mirroring getRecipePortions'
+// own Math.max(1, ...) floor. Findings from unresolvable ingredients are
+// collected and returned alongside the totals rather than dropped.
+function computeRecipeMacros(ingredients, portions) {
+  const findings = [];
+  const totals = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  const items = Array.isArray(ingredients) ? ingredients : [];
+
+  for (const item of items) {
+    const contribution = computeIngredientMacroContribution(item, findings);
+    if (!contribution) continue;
+    totals.kcal += contribution.kcal;
+    totals.protein += contribution.protein;
+    totals.carbs += contribution.carbs;
+    totals.fat += contribution.fat;
+  }
+
+  const divisor = Math.max(1, Number(portions) || 1);
+  const perServing = {
+    kcal: totals.kcal / divisor,
+    protein: totals.protein / divisor,
+    carbs: totals.carbs / divisor,
+    fat: totals.fat / divisor,
+  };
+
+  return { perServing, totals, findings };
+}
+
+// Renders a per-serving macro table for the recipe's `### Nutrition` section.
+// energyUnit conversion happens only here (display time) — cached frontmatter
+// values are always kcal.
+function formatMacroTableMarkdown(perServing, energyUnit = ACTIVE_ENERGY_UNIT) {
+  const unit = normalizeEnergyUnit(energyUnit);
+  const energy = convertKcalToDisplayEnergy(perServing?.kcal, unit);
+  const round = (n) => Math.round(Number(n) || 0);
+  return [
+    "| Nutrient | Per serving |",
+    "|---|---|",
+    `| Energy | ${round(energy)} ${unit} |`,
+    `| Protein | ${round(perServing?.protein)} g |`,
+    `| Carbs | ${round(perServing?.carbs)} g |`,
+    `| Fat | ${round(perServing?.fat)} g |`,
+  ].join("\n");
+}
+
+// Renders the per-recipe macro findings into a markdown report note, mirroring
+// buildRecipeValidationReport's format.
+function buildMacroCalculationReport(recipeReports, totalRecipes = 0) {
+  const reports = Array.isArray(recipeReports) ? recipeReports : [];
+  const withFindings = reports.filter((r) => r && Array.isArray(r.findings) && r.findings.length > 0);
+  const lines = [
+    "# Macro Calculation Report",
+    "",
+    `Generated: ${new Date().toISOString()}`,
+    `Calculated ${totalRecipes} recipe(s); ${withFindings.length} with findings.`,
+    "",
+  ];
+
+  if (withFindings.length === 0) {
+    lines.push("✅ No issues found.");
+    return lines.join("\n");
+  }
+
+  for (const report of withFindings) {
+    const name = String(report.name || "Untitled recipe");
+    lines.push(`## ${report.link || name}`);
+    for (const finding of report.findings) {
+      const icon = VALIDATION_SEVERITY_ICONS[finding.severity] || "•";
+      lines.push(`- ${icon} ${finding.message}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+// Groups per-recipe family-serving rows (each { person, file, servings, macros }
+// collected by generateWeeklyShoppingList from "Family: <name>" canvas groups)
+// by person and renders the "## Family Meal Plan" report lines. macros is only
+// present when the recipe has TrackMacros: true and cached frontmatter macro
+// values — read directly, never recomputed here.
+function buildFamilyMealPlanLines(rows, energyUnit = ACTIVE_ENERGY_UNIT) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (list.length === 0) return ["- None"];
+
+  const byPerson = new Map();
+  for (const row of list) {
+    if (!row?.person) continue;
+    if (!byPerson.has(row.person)) byPerson.set(row.person, []);
+    byPerson.get(row.person).push(row);
+  }
+
+  const unit = normalizeEnergyUnit(energyUnit);
+  const lines = [];
+  for (const [person, personRows] of byPerson) {
+    lines.push(`### ${person}`);
+    for (const row of personRows) {
+      const servingsLabel = `${formatMetricAmount(row.servings)} serving(s)`;
+      let macroLabel = "macros not tracked for this recipe";
+      if (row.macros) {
+        const energy = convertKcalToDisplayEnergy(row.macros.kcal, unit);
+        macroLabel = `${Math.round(energy)} ${unit}, ${Math.round(row.macros.protein)}g protein, ${Math.round(row.macros.carbs)}g carbs, ${Math.round(row.macros.fat)}g fat per serving`;
+      }
+      lines.push(`- [[${row.file.path}|${row.file.basename}]]: ${servingsLabel} (${macroLabel})`);
+    }
+  }
+  return lines;
 }
 
 function parseAmountToken(token) {
@@ -2786,6 +3186,23 @@ function normalizeExactExclusionList(values) {
     .filter(Boolean);
 }
 
+// Household member names for family/multi-person meal planning. Convenience
+// list only (autocomplete/labeling) — case-insensitively deduplicated.
+function normalizeFamilyMembersList(values) {
+  if (!Array.isArray(values)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of values) {
+    const name = String(raw || "").trim();
+    if (!name) continue;
+    const key = normalizeSearchText(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
 function parseExcludedIngredients(lines) {
   const values = Array.isArray(lines) ? lines : [];
   const map = new Map();
@@ -3747,11 +4164,21 @@ function getNodeCenter(node) {
   return { x: x + width / 2, y: y + height / 2 };
 }
 
+// Returns { type: "project"|"hosting"|"family"|"default", person?: string }.
+// A group labeled "Family: <name>" (case-insensitive) is how a canvas group is
+// assigned to a named household member, without any change to the .canvas
+// JSON schema itself — same freeform-label-text mechanism "project"/"hosting"
+// already use.
 function classifySectionLabel(label) {
-  const l = String(label || "").toLowerCase();
-  if (l.includes("project")) return "project";
-  if (l.includes("hosting")) return "hosting";
-  return "default";
+  const raw = String(label || "");
+  const l = raw.toLowerCase();
+  // Match against the original-case label so the captured person name keeps
+  // its casing (e.g. "Family: Alice" -> "Alice", not "alice").
+  const familyMatch = raw.match(/family\s*:\s*(.+)/i);
+  if (familyMatch) return { type: "family", person: familyMatch[1].trim() };
+  if (l.includes("project")) return { type: "project" };
+  if (l.includes("hosting")) return { type: "hosting" };
+  return { type: "default" };
 }
 
 function sectionForNode(node, groups) {
@@ -3768,10 +4195,10 @@ function sectionForNode(node, groups) {
 
   for (const g of containing) {
     const section = classifySectionLabel(g.label);
-    if (section !== "default") return section;
+    if (section.type !== "default") return section;
   }
 
-  return "default";
+  return { type: "default" };
 }
 
 function parseCanvasRecipeEntries(canvasText) {
@@ -4458,6 +4885,18 @@ class RecipeCardModal extends Modal {
     addBtn("Add To Weekly Plan", async () => this.plugin.addRecipeToCanvas(this.file.path, "default"));
     addBtn("Add As Project", async () => this.plugin.addRecipeToCanvas(this.file.path, "project"));
     addBtn("Add As Hosting", async () => this.plugin.addRecipeToCanvas(this.file.path, "hosting"));
+    addBtn("Add As Family Member...", async () => {
+      const familyMembers = normalizeFamilyMembersList(this.plugin.settings.familyMembers);
+      const result = await this.plugin.promptTextEntry({
+        title: "Add as family member",
+        label: familyMembers.length > 0 ? `Person's name (e.g. ${familyMembers.join(", ")})` : "Person's name",
+        submitText: "Add",
+      });
+      if (result.cancelled) return;
+      const person = String(result.value || "").trim();
+      if (!person) return;
+      await this.plugin.addRecipeToCanvas(this.file.path, { type: "family", person });
+    });
     addBtn("Generate Shopping List", async () => {
       const ok = this.app.commands.executeCommandById("weekly-meal-shopper:generate-weekly-shopping-list-from-canvas");
       if (!ok) new Notice("Generate shopping list command not found.");
@@ -4817,6 +5256,24 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "calculate-recipe-macros",
+      name: "Calculate recipe macros",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!(file instanceof TFile) || file.extension !== "md") { new Notice("Open a recipe note first."); return; }
+        await this.calculateRecipeMacros(file);
+      },
+    });
+
+    this.addCommand({
+      id: "calculate-macros-for-all-recipes",
+      name: "Calculate macros for all recipes",
+      callback: async () => {
+        await this.calculateMacrosForAllRecipes();
+      },
+    });
+
+    this.addCommand({
       id: "create-weekly-meal-prep-canvas",
       name: "Open or create meal plan canvas",
       callback: async () => {
@@ -4897,6 +5354,25 @@ class WeeklyMealShopperPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "add-active-recipe-to-canvas-family",
+      name: "Add active recipe to weekly meal plan (family member)",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!(file instanceof TFile) || file.extension !== "md") { new Notice("Open a recipe note first."); return; }
+        const familyMembers = normalizeFamilyMembersList(this.settings.familyMembers);
+        const result = await this.promptTextEntry({
+          title: "Add as family member",
+          label: familyMembers.length > 0 ? `Person's name (e.g. ${familyMembers.join(", ")})` : "Person's name",
+          submitText: "Add",
+        });
+        if (result.cancelled) return;
+        const person = String(result.value || "").trim();
+        if (!person) return;
+        await this.addRecipeToCanvas(file.path, { type: "family", person });
+      },
+    });
+
   }
 
   onunload() {
@@ -4905,7 +5381,7 @@ class WeeklyMealShopperPlugin extends Plugin {
   }
 
   // Adds a recipe file node to the weekly meal-plan canvas.
-  // section: "default" | "project" | "hosting"
+  // section: "default" | "project" | "hosting" | { type: "family", person: string }
   async addRecipeToCanvas(filePath, section = "default") {
     const canvasPath = normalizePath(this.settings.weeklyCanvasPath || DEFAULT_SETTINGS.weeklyCanvasPath);
     const target = this.app.vault.getAbstractFileByPath(canvasPath);
@@ -4932,15 +5408,38 @@ class WeeklyMealShopperPlugin extends Plugin {
       return false;
     }
 
+    const isFamily = !!(section && typeof section === "object" && section.type === "family" && section.person);
+    const sectionLabel = isFamily ? `family: ${section.person}` : String(section || "default");
+
     let x = 100;
     let y = 100;
 
-    const groups = canvas.nodes.filter((n) => n && n.type === "group");
+    let groups = canvas.nodes.filter((n) => n && n.type === "group");
     const labelPattern =
+      isFamily ? new RegExp(`family\\s*:\\s*${escapeRegExp(section.person)}`, "i") :
       section === "project" ? /project/i :
       section === "hosting" ? /hosting/i :
       null;
-    const group = labelPattern ? groups.find((g) => labelPattern.test(String(g.label || ""))) : null;
+    let group = labelPattern ? groups.find((g) => labelPattern.test(String(g.label || ""))) : null;
+
+    if (!group && isFamily) {
+      // Family groups aren't part of the bundled canvas template — create one
+      // on the fly, below any existing groups. Still a plain `group` node, so
+      // this doesn't change the .canvas JSON schema.
+      const maxGroupBottom = groups.reduce((m, g) => Math.max(m, (Number(g.y) || 0) + (Number(g.height) || 0)), 0);
+      group = {
+        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
+        type: "group",
+        x: -640,
+        y: maxGroupBottom + 80,
+        width: 900,
+        height: 600,
+        color: "6",
+        label: `Family: ${section.person}`,
+      };
+      canvas.nodes.push(group);
+      groups = [...groups, group];
+    }
 
     if (group) {
       const inGroup = canvas.nodes.filter((n) => {
@@ -4967,7 +5466,7 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     await this.app.vault.modify(target, `${JSON.stringify(canvas, null, 2)}\n`);
     const basename = normalizedFile.split("/").pop()?.replace(/\.md$/, "") || normalizedFile;
-    new Notice(`Added ${basename} to meal plan canvas (${section}).`);
+    new Notice(`Added ${basename} to meal plan canvas (${sectionLabel}).`);
     return true;
   }
 
@@ -5008,6 +5507,10 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.tspMl = Number.isFinite(Number(this.settings.tspMl)) ? Number(this.settings.tspMl) : 5;
     this.settings.measurementPreference = normalizeMeasurementPreference(this.settings.measurementPreference);
     this.settings.convertLiquidVolumeMeasuresToWeight = this.settings.convertLiquidVolumeMeasuresToWeight !== false;
+    this.settings.energyUnit = normalizeEnergyUnit(this.settings.energyUnit);
+    this.settings.macrosEnabled = this.settings.macrosEnabled === true;
+    this.settings.nutritionDatabasePath = String(this.settings.nutritionDatabasePath || "").trim();
+    this.settings.familyMembers = normalizeFamilyMembersList(this.settings.familyMembers);
     delete this.settings.cupShorthand;
     delete this.settings.tbspShorthand;
     delete this.settings.tspShorthand;
@@ -5051,6 +5554,8 @@ class WeeklyMealShopperPlugin extends Plugin {
       shoppingCategoriesCollapsed: !!sectionState.shoppingCategoriesCollapsed,
       excludeIngredientsCollapsed: !!sectionState.excludeIngredientsCollapsed,
       ingredientOverridesCollapsed: !!sectionState.ingredientOverridesCollapsed,
+      nutritionSectionCollapsed: !!sectionState.nutritionSectionCollapsed,
+      familySectionCollapsed: !!sectionState.familySectionCollapsed,
     };
     this.settings.transcriptionApiKey = String(this.settings.transcriptionApiKey || "").trim();
     if (typeof this.settings.useStoredTranscriptionApiKey !== "boolean") {
@@ -5084,6 +5589,10 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.recipeViewIngredientDisplayTemplate = normalizeRecipeViewIngredientDisplayTemplate(
       this.settings.recipeViewIngredientDisplayTemplate || legacyIngredientDisplayTemplate
     );
+    this.settings.energyUnit = normalizeEnergyUnit(this.settings.energyUnit);
+    this.settings.macrosEnabled = this.settings.macrosEnabled === true;
+    this.settings.nutritionDatabasePath = String(this.settings.nutritionDatabasePath || "").trim();
+    this.settings.familyMembers = normalizeFamilyMembersList(this.settings.familyMembers);
     setActiveMeasurementProfile(this.settings);
     setActiveIngredientStorageSeparator(this.settings.ingredientStorageSeparator);
     setActiveRecipeViewIngredientDisplayTemplate(this.settings.recipeViewIngredientDisplayTemplate);
@@ -7388,6 +7897,105 @@ class WeeklyMealShopperPlugin extends Plugin {
     new Notice(`Validated ${recipes.length} recipe(s); ${reports.length} with findings.`);
   }
 
+  // Computes and caches per-serving macros for one recipe (frontmatter fields
+  // MacroKcalPerServing/MacroProteinGPerServing/MacroCarbsGPerServing/
+  // MacroFatGPerServing/MacrosLastCalculated, plus a rendered table in the
+  // recipe's ### Nutrition section). Guards on the global macrosEnabled
+  // setting, then the per-recipe TrackMacros frontmatter toggle. Pass
+  // { silent: true } when calling from a batch loop to suppress per-file
+  // Notices — findings are returned either way.
+  async calculateRecipeMacros(file, { silent = false } = {}) {
+    if (!this.settings.macrosEnabled) {
+      if (!silent) new Notice("Enable macro tracking in settings first.");
+      return null;
+    }
+
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+    if (fm.TrackMacros !== true) {
+      if (!silent) new Notice(`Macro tracking is off for "${file.basename}" (set TrackMacros: true in frontmatter).`);
+      return null;
+    }
+
+    let ingredients = [];
+    try {
+      ingredients = await this.getRecipeIngredients(file);
+    } catch (error) {
+      const message = error?.message || String(error);
+      if (!silent) new Notice(message);
+      return { perServing: { kcal: 0, protein: 0, carbs: 0, fat: 0 }, findings: [{ severity: "error", type: "read", message }] };
+    }
+
+    const portions = this.getRecipePortions(file);
+    await this.loadNutritionConfig();
+    const { perServing, findings } = computeRecipeMacros(ingredients, portions);
+
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      frontmatter.MacroKcalPerServing = Number(perServing.kcal.toFixed(1));
+      frontmatter.MacroProteinGPerServing = Number(perServing.protein.toFixed(1));
+      frontmatter.MacroCarbsGPerServing = Number(perServing.carbs.toFixed(1));
+      frontmatter.MacroFatGPerServing = Number(perServing.fat.toFixed(1));
+      frontmatter.MacrosLastCalculated = new Date().toISOString();
+    });
+
+    try {
+      const content = await this.app.vault.read(file);
+      const tableMarkdown = formatMacroTableMarkdown(perServing, this.settings.energyUnit);
+      const updated = replaceMarkdownSectionBody(content, "Nutrition", tableMarkdown);
+      if (updated !== null && updated !== content) {
+        await this.app.vault.modify(file, updated);
+      }
+    } catch (error) {
+      console.error("[weekly-meal-shopper] Failed to render Nutrition section:", error);
+    }
+
+    if (!silent) {
+      if (findings.length > 0) {
+        new Notice(`Calculated macros for ${file.basename} with ${findings.length} finding(s) (see console).`);
+        console.warn("[weekly-meal-shopper] Macro findings for", file.basename, findings);
+      } else {
+        new Notice(`Calculated macros for ${file.basename}.`);
+      }
+    }
+
+    return { perServing, findings };
+  }
+
+  // Batch variant of calculateRecipeMacros: runs it (silently) over every
+  // recipe with TrackMacros: true and writes an aggregate findings report,
+  // mirroring validateRecipes()'s report-writing shape.
+  async calculateMacrosForAllRecipes() {
+    if (!this.settings.macrosEnabled) {
+      new Notice("Enable macro tracking in settings first.");
+      return;
+    }
+
+    const recipes = this.app.vault.getMarkdownFiles().filter((file) => {
+      if (!this.isRecipeFile(file)) return false;
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+      return fm.TrackMacros === true;
+    });
+
+    const reports = [];
+    for (const file of recipes) {
+      const result = await this.calculateRecipeMacros(file, { silent: true });
+      if (result && result.findings.length > 0) {
+        reports.push({ name: file.basename, link: `[[${file.path}|${file.basename}]]`, findings: result.findings });
+      }
+    }
+
+    const generated = buildMacroCalculationReport(reports, recipes.length);
+    const outputPath = normalizePath("Utility/🥗 Macro Calculation Report.md");
+    const existing = this.app.vault.getAbstractFileByPath(outputPath);
+    if (existing instanceof TFile) {
+      await this.app.vault.modify(existing, generated);
+      await this.app.workspace.getLeaf(true).openFile(existing);
+    } else {
+      const created = await this.app.vault.create(outputPath, generated);
+      await this.app.workspace.getLeaf(true).openFile(created);
+    }
+    new Notice(`Calculated macros for ${recipes.length} recipe(s); ${reports.length} with findings.`);
+  }
+
   getRecipePortions(file) {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter || {};
@@ -7448,6 +8056,55 @@ class WeeklyMealShopperPlugin extends Plugin {
       WEIGHT_DENSITY_ENTRIES = buildDensityEntries(WEIGHT_DENSITY_G_PER_ML);
       new Notice("Unit-density config is invalid JSON. Using built-in defaults.");
       return WEIGHT_DENSITY_G_PER_ML;
+    }
+  }
+
+  async ensureNutritionConfigFile() {
+    const configPath = normalizePath(NUTRITION_CONFIG_PATH);
+    const exists = await this.app.vault.adapter.exists(configPath);
+    if (exists) return;
+    await this.app.vault.adapter.write(
+      configPath,
+      `${JSON.stringify(DEFAULT_NUTRITION_CONFIG, null, 2)}\n`
+    );
+  }
+
+  // If settings.nutritionDatabasePath is set, that file takes priority over
+  // the bundled default; falls back to the bundled default on a missing file
+  // or invalid JSON at either location.
+  async loadNutritionConfig() {
+    await this.ensureNutritionConfigFile();
+    const customPath = String(this.settings.nutritionDatabasePath || "").trim();
+
+    if (customPath) {
+      const normalizedCustomPath = normalizePath(customPath);
+      const customExists = await this.app.vault.adapter.exists(normalizedCustomPath);
+      if (customExists) {
+        try {
+          const raw = await this.app.vault.adapter.read(normalizedCustomPath);
+          const parsed = JSON.parse(raw);
+          NUTRITION_ENTRIES = buildNutritionEntries(parsed);
+          return parsed;
+        } catch (error) {
+          console.error("[weekly-meal-shopper] Failed to parse custom nutrition database:", error);
+          new Notice("Custom nutrition database is invalid JSON. Using built-in defaults.");
+        }
+      } else {
+        new Notice(`Custom nutrition database not found: ${customPath}. Using built-in defaults.`);
+      }
+    }
+
+    const configPath = normalizePath(NUTRITION_CONFIG_PATH);
+    try {
+      const raw = await this.app.vault.adapter.read(configPath);
+      const parsed = JSON.parse(raw);
+      NUTRITION_ENTRIES = buildNutritionEntries(parsed);
+      return parsed;
+    } catch (error) {
+      console.error("[weekly-meal-shopper] Failed to parse nutrition database config:", error);
+      NUTRITION_ENTRIES = buildNutritionEntries(DEFAULT_NUTRITION_CONFIG);
+      new Notice("Nutrition database config is invalid JSON. Using built-in defaults.");
+      return DEFAULT_NUTRITION_CONFIG;
     }
   }
 
@@ -7557,15 +8214,22 @@ class WeeklyMealShopperPlugin extends Plugin {
           defaultCount: 0,
           projectCount: 0,
           hostingCount: 0,
+          // 1 card placed in a person's "Family: <name>" group = 1 serving for
+          // that person, mirroring how hostingCount/projectCount are also
+          // just card counts (no separate per-card serving-count prompt).
+          familyServings: new Map(),
           // Card count contributed by each source canvas, used to split the
           // ingredient list per canvas when splitShoppingListByCanvas is on.
           cardsByCanvas: new Map(),
         };
         recipes.set(file.path, existing);
       }
-      if (entry.section === "project") existing.projectCount += 1;
-      else if (entry.section === "hosting") existing.hostingCount += 1;
-      else existing.defaultCount += 1;
+      if (entry.section?.type === "project") existing.projectCount += 1;
+      else if (entry.section?.type === "hosting") existing.hostingCount += 1;
+      else if (entry.section?.type === "family" && entry.section.person) {
+        const person = entry.section.person;
+        existing.familyServings.set(person, (existing.familyServings.get(person) || 0) + 1);
+      } else existing.defaultCount += 1;
       const canvasPath = entry.sourceCanvas?.path || "";
       existing.cardsByCanvas.set(canvasPath, (existing.cardsByCanvas.get(canvasPath) || 0) + 1);
     }
@@ -7658,7 +8322,9 @@ class WeeklyMealShopperPlugin extends Plugin {
       targetTotals.set(key, existing);
     };
 
-    for (const { file, defaultCount, projectCount, hostingCount, cardsByCanvas } of recipes.values()) {
+    const familyMealPlanRows = [];
+
+    for (const { file, defaultCount, projectCount, hostingCount, familyServings, cardsByCanvas } of recipes.values()) {
       const profile = this.getRecipePlanningProfile(file, defaultCount);
       let ingredients = [];
       try {
@@ -7671,9 +8337,29 @@ class WeeklyMealShopperPlugin extends Plugin {
 
       const projectPortionsTotal = projectCount > 0 ? (projectServingsTargets.get(file.path) || 0) : 0;
       const hostingPortionsTotal = hostingCount > 0 ? hostingPeopleNeeded * hostingCount : 0;
+      const familyPortionsTotal = familyServings instanceof Map
+        ? [...familyServings.values()].reduce((sum, n) => sum + n, 0)
+        : 0;
       const projectBatches = projectPortionsTotal > 0 ? Math.ceil(projectPortionsTotal / recipePortions) : 0;
       const hostingBatches = hostingPortionsTotal > 0 ? Math.ceil(hostingPortionsTotal / recipePortions) : 0;
-      const totalBatches = profile.cooksNeeded + projectBatches + hostingBatches;
+      const familyBatches = familyPortionsTotal > 0 ? Math.ceil(familyPortionsTotal / recipePortions) : 0;
+      const totalBatches = profile.cooksNeeded + projectBatches + hostingBatches + familyBatches;
+
+      if (familyServings instanceof Map && familyServings.size > 0) {
+        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+        const macrosAvailable = this.settings.macrosEnabled === true
+          && fm.TrackMacros === true
+          && Number.isFinite(Number(fm.MacroKcalPerServing));
+        const macros = macrosAvailable ? {
+          kcal: Number(fm.MacroKcalPerServing),
+          protein: Number(fm.MacroProteinGPerServing),
+          carbs: Number(fm.MacroCarbsGPerServing),
+          fat: Number(fm.MacroFatGPerServing),
+        } : null;
+        for (const [person, servings] of familyServings) {
+          familyMealPlanRows.push({ person, file, servings, macros });
+        }
+      }
 
       recipePlanLines.push(
         `- [[${file.path}|${file.basename}]] weekly x${defaultCount} (planned ${profile.plannedPortions} portions, frozen used ${profile.frozenUsed}, cook batches ${profile.cooksNeeded})`
@@ -7785,6 +8471,9 @@ class WeeklyMealShopperPlugin extends Plugin {
       "",
       "## Hosting Scaling",
       hostingScaleLines.join("\n") || "- None",
+      "",
+      "## Family Meal Plan",
+      buildFamilyMealPlanLines(familyMealPlanRows, this.settings.energyUnit).join("\n"),
       "",
       "## Shopping Checklist",
       shoppingChecklistBlock,
@@ -8252,6 +8941,14 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     this.renderLegumeSettingsSection(containerEl);
 
     this.renderCategoryHeading(containerEl, {
+      title: "Nutrition & Family",
+      description: "Macro tracking (protein/carbs/fat/kcal) and multi-person meal planning.",
+    });
+
+    this.renderNutritionSettingsSection(containerEl);
+    this.renderFamilySettingsSection(containerEl);
+
+    this.renderCategoryHeading(containerEl, {
       title: "First-Time Setup",
       description: "Use this once to choose where the editable template copies should live in your vault, then open those files whenever you want to customize them.",
     });
@@ -8417,6 +9114,110 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           await this.display();
         })
       );
+  }
+
+  renderNutritionSettingsSection(containerEl) {
+    const { body } = this.buildFoldableSection(containerEl, {
+      stateKey: "nutritionSectionCollapsed",
+      title: "Nutrition & Macros",
+      description: "Per-serving protein/carbs/fat/kcal, opt-in per recipe via TrackMacros in frontmatter.",
+    });
+
+    new Setting(body)
+      .setName("Enable macro tracking")
+      .setDesc("Master switch for the 'Calculate recipe macros' commands. Off by default — fully inert until turned on.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.macrosEnabled === true)
+          .onChange(async (value) => {
+            this.plugin.settings.macrosEnabled = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(body)
+      .setName("Energy unit")
+      .setDesc("Independent of the measurement preference above — only affects how calculated energy is displayed. Cached values are always stored as kcal.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("kcal", "kcal")
+          .addOption("kJ", "kJ")
+          .setValue(normalizeEnergyUnit(this.plugin.settings.energyUnit))
+          .onChange(async (value) => {
+            this.plugin.settings.energyUnit = normalizeEnergyUnit(value);
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(body)
+      .setName("Custom nutrition database path (optional)")
+      .setDesc("Vault-relative path to a JSON file shaped like the bundled nutrition-database.json. Leave empty to use the bundled default.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Leave empty for the bundled default")
+          .setValue(this.plugin.settings.nutritionDatabasePath || "")
+          .onChange(async (value) => {
+            this.plugin.settings.nutritionDatabasePath = String(value || "").trim();
+            await this.plugin.saveSettings();
+          })
+      )
+      .addButton((btn) =>
+        btn.setButtonText("Reload nutrition database").onClick(async () => {
+          const config = await this.plugin.loadNutritionConfig();
+          const count = config && typeof config.entries === "object" ? Object.keys(config.entries).length : 0;
+          new Notice(`Nutrition database reloaded (${count} ingredient(s)).`);
+        })
+      );
+  }
+
+  renderFamilySettingsSection(containerEl) {
+    const { body, searchInput } = this.buildFoldableSection(containerEl, {
+      stateKey: "familySectionCollapsed",
+      title: "Family",
+      description: "Household member names, used for autocomplete/labeling convenience only — canvas groups like 'Family: Anyone' work even if 'Anyone' isn't listed here.",
+      searchPlaceholder: "Add a family member name and press Enter",
+    });
+
+    const listEl = body.createDiv({ cls: "weekly-meal-shopper-entry-list" });
+
+    const renderList = () => {
+      listEl.empty();
+      const members = normalizeFamilyMembersList(this.plugin.settings.familyMembers);
+      if (members.length === 0) {
+        listEl.createEl("div", { text: "No family members added yet.", cls: "weekly-meal-shopper-empty" });
+        return;
+      }
+      for (const name of members) {
+        const row = listEl.createDiv({ cls: "weekly-meal-shopper-entry-row" });
+        row.createEl("span", { text: name, cls: "weekly-meal-shopper-entry-text" });
+        const removeBtn = row.createEl("button", { text: "Remove", cls: "weekly-meal-shopper-remove-btn" });
+        removeBtn.addEventListener("click", async () => {
+          const key = normalizeSearchText(name);
+          this.plugin.settings.familyMembers = normalizeFamilyMembersList(this.plugin.settings.familyMembers)
+            .filter((existing) => normalizeSearchText(existing) !== key);
+          await this.plugin.saveSettings();
+          renderList();
+        });
+      }
+    };
+
+    if (searchInput) {
+      searchInput.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter") return;
+        const name = String(searchInput.value || "").trim();
+        if (!name) return;
+        event.preventDefault();
+        this.plugin.settings.familyMembers = normalizeFamilyMembersList([
+          ...this.plugin.settings.familyMembers,
+          name,
+        ]);
+        await this.plugin.saveSettings();
+        searchInput.value = "";
+        renderList();
+      });
+    }
+
+    renderList();
   }
 
   renderLegumeSettingsSection(containerEl) {
