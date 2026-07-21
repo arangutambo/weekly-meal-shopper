@@ -359,6 +359,17 @@
   border-top: none;
 }
 
+.weekly-meal-shopper-coverage-row.is-clickable {
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.weekly-meal-shopper-coverage-row.is-clickable:hover,
+.weekly-meal-shopper-coverage-row.is-clickable:focus-visible {
+  background: var(--background-modifier-hover);
+  outline: none;
+}
+
 .weekly-meal-shopper-coverage-dot {
   width: 8px;
   height: 8px;
@@ -368,7 +379,11 @@
   background: var(--color-red);
 }
 
-.weekly-meal-shopper-coverage-row.is-covered .weekly-meal-shopper-coverage-dot {
+.weekly-meal-shopper-coverage-row.is-yellow .weekly-meal-shopper-coverage-dot {
+  background: var(--color-yellow);
+}
+
+.weekly-meal-shopper-coverage-row.is-green .weekly-meal-shopper-coverage-dot {
   background: var(--color-green);
 }
 
@@ -385,4 +400,8 @@
 .weekly-meal-shopper-coverage-detail {
   color: var(--text-muted);
   overflow-wrap: break-word;
+}
+
+.weekly-meal-shopper-coverage-cook-again {
+  font-style: italic;
 }

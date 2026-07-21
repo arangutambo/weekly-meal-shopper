@@ -18,6 +18,13 @@ The optional **recipe transcription features** use the OpenAI API:
 
 To use these features you must supply **your own OpenAI API key** in the plugin settings (an OpenAI account with API billing is required). The key is stored locally in the plugin's `data.json` inside your vault's `.obsidian` folder and is only ever sent to OpenAI's API (`api.openai.com`). If you never set a key, no network requests are made.
 
+The optional **macro-tracking nutrition lookup** can also touch the network, and is off by default:
+
+- `Download nutrition dataset` fetches USDA FoodData Central's public-domain Foundation Foods dataset once (`fdc.nal.usda.gov`) and stores it locally — no network needed afterward. Desktop only.
+- The **live lookup fallback** (off by default) sends an ingredient name to whichever provider you choose — USDA FoodData Central (`api.nal.usda.gov`, requires your own free API key) or Open Food Facts (`world.openfoodfacts.org`, no key) — only for ingredients not already found locally, and every result is cached so the same ingredient is never looked up twice.
+
+If you never turn on live lookup or click the download button, no nutrition-related network requests are made.
+
 The plugin collects no telemetry and contains no ads.
 
 ## First Start

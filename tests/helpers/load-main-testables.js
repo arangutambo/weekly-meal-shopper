@@ -54,6 +54,7 @@ function createObsidianStub() {
       throw new Error("requestUrl not available in tests");
     },
     normalizePath: (v) => String(v || ""),
+    Platform: { isMobileApp: false },
   };
 }
 
@@ -91,6 +92,7 @@ function loadMainContext() {
     HTMLElement: FakeHTMLElement,
     require: (id) => {
       if (id === "obsidian") return getObsidianStub();
+      if (id === "zlib") return require("zlib");
       throw new Error(`Unexpected module request in test harness: ${id}`);
     },
   };

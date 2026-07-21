@@ -10,6 +10,7 @@ const {
   MarkdownRenderer,
   requestUrl,
   normalizePath,
+  Platform,
 } = require("obsidian");
 
 const DEFAULT_SETTINGS = {
@@ -62,11 +63,29 @@ const DEFAULT_SETTINGS = {
   // Macronutrient tracking (opt-in globally, then per-recipe via TrackMacros).
   macrosEnabled: false,
   energyUnit: "kcal", // "kcal" | "kJ" — independent of measurementPreference/measurementPreset
-  nutritionDatabasePath: "", // "" = use the bundled nutrition-database.json
+  // Which local dataset feeds estimateIngredientMacrosPer100g by default.
+  nutritionDatabaseSource: "builtin", // "builtin" | "downloaded" | "custom"
+  nutritionDatabasePath: "", // vault-relative path, used when nutritionDatabaseSource = "custom"
+  // Independent of nutritionDatabaseSource: when on, an ingredient not found
+  // locally is looked up from an online provider and the result cached to
+  // nutrition-live-cache.json so it never needs a second network call.
+  nutritionLiveLookupEnabled: false,
+  nutritionLiveLookupProvider: "usda", // "usda" | "openfoodfacts"
+  usdaApiKey: "", // free key from fdc.nal.usda.gov/api-key-signup, only used for live lookup
   // How many portions a single planned instance of a recipe needs to feed —
   // replaces the old per-recipe PortionsPerMeal field. Drives both weekly
   // batch-scaling and the Meal Coverage canvas overlay.
   householdSize: 1,
+  // Live coverage overlay + card coloring on the meal-plan canvas.
+  mealCoverageEnabled: true,
+  // Which weekday sits at the left edge of a newly created meal-plan canvas,
+  // and the chronological reference point for coverage sorting / "cook again
+  // before <day>" callouts.
+  weekStartDay: "saturday",
+  // Per-canvas set of recipe paths the user has clicked to acknowledge as
+  // "needs cooking again, but that's fine" (red -> yellow). Auto-cleared once
+  // a recipe's coverage naturally becomes fully covered again.
+  coverageAcknowledgedShort: {},
   settingsSectionState: {
     firstTimeSetupCollapsed: false,
     mealPrepSetupCollapsed: false,
@@ -185,6 +204,15 @@ function getIsoWeekInfo(inputDate = new Date()) {
 const UNIT_DENSITY_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/unit-density-rules.json";
 const UNIT_ALIAS_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/unit-aliases.json";
 const NUTRITION_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/nutrition-database.json";
+// Written only by "Download nutrition dataset" — never auto-created empty.
+const DOWNLOADED_NUTRITION_CONFIG_PATH = ".obsidian/plugins/weekly-meal-shopper/nutrition-database-downloaded.json";
+// Every successful live-lookup result is cached here so it never needs a
+// second network call; merged on top of whichever primary source is active.
+const LIVE_NUTRITION_CACHE_PATH = ".obsidian/plugins/weekly-meal-shopper/nutrition-live-cache.json";
+// User-set manual ingredient->macro matches (via "Set nutrition match for
+// ingredient" / the Nutrition settings section). Highest priority of all —
+// overrides win over the primary source AND the live cache.
+const NUTRITION_OVERRIDES_PATH = ".obsidian/plugins/weekly-meal-shopper/nutrition-overrides.json";
 
 const FRACTIONS = {
   "½": 0.5,
@@ -716,6 +744,10 @@ function classifyMealCoverageStatus(profile) {
   return profile && profile.cooksNeeded > 1 ? "short" : "covered";
 }
 
+// Display-tier sort order for the Meal Coverage panel: red (unacknowledged
+// short) always first, then yellow (acknowledged short), then green.
+const COVERAGE_STATUS_ORDER = { red: 0, yellow: 1, green: 2 };
+
 // Accepts either raw settings (legume* keys) or short opts (gramsDriedPerCan …)
 // and returns the resolved factor object used by the legume conversion.
 function resolveLegumeFactors(source = {}) {
@@ -755,6 +787,16 @@ function convertKcalToDisplayEnergy(kcal, unit = ACTIVE_ENERGY_UNIT) {
   const num = Number(kcal);
   if (!Number.isFinite(num)) return 0;
   return normalizeEnergyUnit(unit) === "kJ" ? num * KCAL_TO_KJ : num;
+}
+
+function normalizeNutritionDatabaseSource(value) {
+  const v = normalizeSearchText(value);
+  return v === "downloaded" || v === "custom" ? v : "builtin";
+}
+
+function normalizeNutritionLiveLookupProvider(value) {
+  const v = normalizeSearchText(value);
+  return v === "openfoodfacts" ? "openfoodfacts" : "usda";
 }
 
 function setActiveMeasurementProfile(settings) {
@@ -856,6 +898,172 @@ function estimateIngredientMacrosPer100g(name) {
     if (text.includes(pattern)) return macros;
   }
   return null;
+}
+
+// Extensible registry of external nutrition providers for live lookup and/or
+// bulk download. supportsDownload/requiresApiKeyForLookup drive which
+// settings controls are shown for each in renderNutritionSettingsSection.
+const NUTRITION_PROVIDERS = {
+  usda: { name: "USDA FoodData Central", supportsDownload: true, requiresApiKeyForLookup: true },
+  openfoodfacts: { name: "Open Food Facts", supportsDownload: false, requiresApiKeyForLookup: false },
+};
+
+// USDA nutrient ids are stable across records (unlike nutrientName text, which
+// can vary slightly) — 1003 protein, 1004 fat, 1005 carbohydrate, 1008 energy.
+const USDA_NUTRIENT_IDS = { protein: 1003, fat: 1004, carbs: 1005, kcal: 1008 };
+
+// Pure: extracts {kcal,protein,carbs,fat} from one USDA search-API food
+// result's foodNutrients array (flat nutrientId/value shape), or null. Split
+// out from lookupIngredientMacrosFromUsda so the parsing logic is directly
+// testable without mocking requestUrl.
+function extractUsdaSearchResultMacros(foodNutrients) {
+  if (!Array.isArray(foodNutrients)) return null;
+  const byId = new Map();
+  for (const n of foodNutrients) {
+    const id = Number(n?.nutrientId);
+    const value = Number(n?.value);
+    if (Number.isFinite(id) && Number.isFinite(value)) byId.set(id, value);
+  }
+  const kcal = byId.get(USDA_NUTRIENT_IDS.kcal);
+  if (!Number.isFinite(kcal)) return null;
+  return {
+    kcal,
+    protein: byId.get(USDA_NUTRIENT_IDS.protein) || 0,
+    carbs: byId.get(USDA_NUTRIENT_IDS.carbs) || 0,
+    fat: byId.get(USDA_NUTRIENT_IDS.fat) || 0,
+  };
+}
+
+// Looks up one ingredient's per-100g macros from USDA FoodData Central's live
+// search API (https://api.nal.usda.gov/fdc/v1/foods/search). Returns null on
+// any failure (no results, network error, unexpected shape) — never throws,
+// matching estimateIngredientMacrosPer100g's "null means not found" contract.
+async function lookupIngredientMacrosFromUsda(name, apiKey) {
+  const query = String(name || "").trim();
+  const key = String(apiKey || "").trim();
+  if (!query || !key) return null;
+
+  let response;
+  try {
+    response = await requestUrl({
+      url: `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(query)}&pageSize=1`,
+      method: "GET",
+    });
+  } catch {
+    return null;
+  }
+
+  return extractUsdaSearchResultMacros(response?.json?.foods?.[0]?.foodNutrients);
+}
+
+// Pure: extracts {kcal,protein,carbs,fat} from an Open Food Facts product's
+// "nutriments" object, or null. Split out for the same testability reason as
+// extractUsdaSearchResultMacros above.
+function extractOpenFoodFactsMacros(nutriments) {
+  if (!nutriments) return null;
+  const kcal = Number(nutriments["energy-kcal_100g"]);
+  if (!Number.isFinite(kcal)) return null;
+  return {
+    kcal,
+    protein: Number(nutriments["proteins_100g"]) || 0,
+    carbs: Number(nutriments["carbohydrates_100g"]) || 0,
+    fat: Number(nutriments["fat_100g"]) || 0,
+  };
+}
+
+// Looks up one ingredient's per-100g macros from Open Food Facts' free text
+// search (no API key needed). Note: Open Food Facts is a branded/packaged-
+// product database, not a generic-ingredient composition table, so a plain
+// ingredient name (e.g. "olive oil") matches whichever specific product
+// ranked first — less reliable than USDA for raw ingredients, offered because
+// it needs no API key signup.
+async function lookupIngredientMacrosFromOpenFoodFacts(name) {
+  const query = String(name || "").trim();
+  if (!query) return null;
+
+  let response;
+  try {
+    response = await requestUrl({
+      url: `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=1`,
+      method: "GET",
+    });
+  } catch {
+    return null;
+  }
+
+  return extractOpenFoodFactsMacros(response?.json?.products?.[0]?.nutriments);
+}
+
+// USDA republishes bulk datasets periodically with a new date in the
+// filename (checked at fdc.nal.usda.gov/download-datasets) — update this
+// constant if downloads start failing with a 404.
+const FOUNDATION_FOODS_ZIP_URL = "http://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_foundation_food_json_2026-04-30.zip";
+const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
+
+// Extracts and decompresses the first file entry from a ZIP archive buffer.
+// Handles the common case (compression method 0 = stored or 8 = deflate;
+// sizes present directly in the local file header, not a trailing streamed
+// data descriptor). Throws a descriptive error on anything else so a
+// failure is diagnosable rather than silently returning garbage — desktop
+// only (needs Node's zlib for DEFLATE, unavailable on mobile).
+function extractFirstFileFromZip(buffer) {
+  if (buffer.length < 30 || buffer.readUInt32LE(0) !== ZIP_LOCAL_FILE_HEADER_SIGNATURE) {
+    throw new Error("Not a recognizable ZIP file (missing local file header signature).");
+  }
+  const generalPurposeFlag = buffer.readUInt16LE(6);
+  if (generalPurposeFlag & 0x08) {
+    throw new Error("ZIP entry uses a streamed data descriptor, which isn't supported.");
+  }
+  const compressionMethod = buffer.readUInt16LE(8);
+  const compressedSize = buffer.readUInt32LE(18);
+  const fileNameLength = buffer.readUInt16LE(26);
+  const extraFieldLength = buffer.readUInt16LE(28);
+  const dataStart = 30 + fileNameLength + extraFieldLength;
+  const compressedData = buffer.subarray(dataStart, dataStart + compressedSize);
+
+  if (compressionMethod === 0) return compressedData;
+  if (compressionMethod === 8) return require("zlib").inflateRawSync(compressedData);
+  throw new Error(`Unsupported ZIP compression method: ${compressionMethod}`);
+}
+
+// USDA's bulk JSON export nests nutrients as foodNutrients[].nutrient.{id} +
+// .amount — a different shape from the live search API's flat
+// nutrientId/value (main.js's lookupIngredientMacrosFromUsda). Handled
+// defensively since the bulk shape wasn't directly inspectable ahead of
+// time — tries both the nested and flat field names.
+function extractUsdaBulkFoodMacros(foodNutrients) {
+  if (!Array.isArray(foodNutrients)) return null;
+  const byId = new Map();
+  for (const entry of foodNutrients) {
+    const id = Number(entry?.nutrient?.id ?? entry?.nutrientId);
+    const value = Number(entry?.amount ?? entry?.value);
+    if (Number.isFinite(id) && Number.isFinite(value)) byId.set(id, value);
+  }
+  const kcal = byId.get(USDA_NUTRIENT_IDS.kcal);
+  if (!Number.isFinite(kcal)) return null;
+  return {
+    kcal,
+    protein: byId.get(USDA_NUTRIENT_IDS.protein) || 0,
+    carbs: byId.get(USDA_NUTRIENT_IDS.carbs) || 0,
+    fat: byId.get(USDA_NUTRIENT_IDS.fat) || 0,
+  };
+}
+
+// Parses a USDA bulk-download JSON payload (e.g. Foundation Foods) into our
+// { source, entries: { name: {kcal,protein,carbs,fat} } } shape. The
+// top-level key varies by dataset (FoundationFoods, SRLegacyFoods, ...) —
+// use whichever array-valued top-level key is present.
+function parseUsdaBulkDatasetToNutritionConfig(parsedJson) {
+  const foodsArray = Object.values(parsedJson || {}).find((v) => Array.isArray(v));
+  const entries = {};
+  for (const food of foodsArray || []) {
+    const name = normalizeSearchText(food?.description);
+    if (!name) continue;
+    const macros = extractUsdaBulkFoodMacros(food?.foodNutrients);
+    if (!macros) continue;
+    entries[name] = macros;
+  }
+  return { source: "USDA FoodData Central (downloaded)", entries };
 }
 
 function isLikelyLiquidIngredient(name) {
@@ -4151,16 +4359,18 @@ function classifySectionLabel(label) {
   return "default";
 }
 
+function isPointInGroupBounds(point, g) {
+  const x = typeof g.x === "number" ? g.x : 0;
+  const y = typeof g.y === "number" ? g.y : 0;
+  const w = typeof g.width === "number" ? g.width : 0;
+  const h = typeof g.height === "number" ? g.height : 0;
+  return point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h;
+}
+
 function sectionForNode(node, groups) {
   const center = getNodeCenter(node);
   const containing = groups
-    .filter((g) => {
-      const x = typeof g.x === "number" ? g.x : 0;
-      const y = typeof g.y === "number" ? g.y : 0;
-      const w = typeof g.width === "number" ? g.width : 0;
-      const h = typeof g.height === "number" ? g.height : 0;
-      return center.x >= x && center.x <= x + w && center.y >= y && center.y <= y + h;
-    })
+    .filter((g) => isPointInGroupBounds(center, g))
     .sort((a, b) => (a.width * a.height) - (b.width * b.height));
 
   for (const g of containing) {
@@ -4169,6 +4379,88 @@ function sectionForNode(node, groups) {
   }
 
   return "default";
+}
+
+// Canonical Sunday..Saturday order, lowercase. The meal-plan canvas grid is
+// day-columns (labeled with one of these names) x meal-type rows (any other
+// non-project/hosting group label).
+const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const WEEKDAY_DISPLAY_NAMES = {
+  sunday: "Sunday", monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday",
+  thursday: "Thursday", friday: "Friday", saturday: "Saturday",
+};
+
+function normalizeWeekStartDay(value) {
+  const v = normalizeSearchText(value);
+  return WEEKDAY_NAMES.includes(v) ? v : "saturday";
+}
+
+// The 7 weekday names in Sun..Sat order, rotated so index 0 is startDay —
+// e.g. startDay "saturday" -> [saturday, sunday, monday, ... friday].
+function getOrderedWeekdays(startDay) {
+  const start = WEEKDAY_NAMES.indexOf(normalizeWeekStartDay(startDay));
+  return [...WEEKDAY_NAMES.slice(start), ...WEEKDAY_NAMES.slice(0, start)];
+}
+
+// Chronological rank (0..6) of a weekday name relative to startDay; unknown
+// or unscheduled (null/blank) days sort last.
+function weekdayRank(dayName, startDay) {
+  const normalized = normalizeSearchText(dayName);
+  if (!normalized) return 999;
+  const idx = getOrderedWeekdays(startDay).indexOf(normalized);
+  return idx === -1 ? 999 : idx;
+}
+
+// Finds the smallest weekday-labeled group containing this node's center, or
+// null if the card isn't sitting inside a recognizable day column.
+function findContainingWeekdayLabel(node, groups) {
+  const center = getNodeCenter(node);
+  const candidates = groups
+    .filter((g) => WEEKDAY_NAMES.includes(normalizeSearchText(g.label)))
+    .filter((g) => isPointInGroupBounds(center, g))
+    .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+  return candidates.length > 0 ? normalizeSearchText(candidates[0].label) : null;
+}
+
+// Finds the smallest non-weekday, non-project/hosting group containing this
+// node's center — by convention that's the meal-type row (Breakfast, Dinner,
+// ...), whatever the user has actually named it.
+function findContainingMealTypeLabel(node, groups) {
+  const center = getNodeCenter(node);
+  const candidates = groups
+    .filter((g) => !WEEKDAY_NAMES.includes(normalizeSearchText(g.label)))
+    .filter((g) => classifySectionLabel(g.label) === "default")
+    .filter((g) => isPointInGroupBounds(center, g))
+    .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+  return candidates.length > 0 ? String(candidates[0].label || "").trim() : null;
+}
+
+// Rewrites weekday-labeled group nodes in a canvas template's JSON text so
+// the leftmost day slot (smallest x) shows startDay, then the rest follow in
+// chronological order. Only which weekday LABEL sits in which slot changes —
+// the grid geometry (x/y/width/height, number of day slots) is left exactly
+// as authored. Returns the input unchanged if it isn't parseable JSON or has
+// no recognizable weekday groups (e.g. a heavily customized template).
+function applyWeekStartDayToCanvasTemplate(templateContent, startDay) {
+  let canvas;
+  try {
+    canvas = JSON.parse(templateContent);
+  } catch {
+    return templateContent;
+  }
+  if (!Array.isArray(canvas.nodes)) return templateContent;
+
+  const dayGroups = canvas.nodes
+    .filter((n) => n && n.type === "group" && WEEKDAY_NAMES.includes(normalizeSearchText(n.label)))
+    .sort((a, b) => (Number(a.x) || 0) - (Number(b.x) || 0));
+  if (dayGroups.length === 0) return templateContent;
+
+  const orderedNames = getOrderedWeekdays(startDay);
+  dayGroups.forEach((group, i) => {
+    group.label = WEEKDAY_DISPLAY_NAMES[orderedNames[i % orderedNames.length]];
+  });
+
+  return `${JSON.stringify(canvas, null, 2)}\n`;
 }
 
 function parseCanvasRecipeEntries(canvasText) {
@@ -4631,6 +4923,122 @@ class TextEntryModal extends Modal {
       input.focus();
       input.select();
     }, 0);
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    if (!this.submitted) this.options.onCancel?.();
+  }
+}
+
+// Lets the user manually pin an ingredient's per-100g macros — either by
+// searching/picking an existing database entry (auto-fills the number
+// fields, which stay editable) or typing values directly. Always saves
+// whatever the four number fields hold, regardless of how they got there.
+class NutritionMatchModal extends Modal {
+  constructor(app, options) {
+    super(app);
+    this.options = options || {};
+    this.submitted = false;
+  }
+
+  onOpen() {
+    const { contentEl, titleEl } = this;
+    contentEl.empty();
+    titleEl.setText(`Nutrition match: ${this.options.ingredient || ""}`);
+
+    const current = this.options.currentMacros;
+    contentEl.createEl("p", {
+      text: current
+        ? `Currently resolves to ${Math.round(current.kcal)} kcal, ${Math.round(current.protein)}g protein, ${Math.round(current.carbs)}g carbs, ${Math.round(current.fat)}g fat per 100g.`
+        : "No current match — this ingredient doesn't resolve to anything yet.",
+    }).addClass("weekly-meal-shopper-empty");
+
+    const searchLabel = contentEl.createEl("label", { text: "Search existing database entries" });
+    searchLabel.style.display = "block";
+    searchLabel.style.marginTop = "10px";
+    searchLabel.style.marginBottom = "6px";
+    const searchInput = contentEl.createEl("input", { type: "search", placeholder: "e.g. chicken breast" });
+    searchInput.style.width = "100%";
+    searchInput.style.marginBottom = "6px";
+
+    const resultsEl = contentEl.createDiv();
+    resultsEl.style.maxHeight = "140px";
+    resultsEl.style.overflowY = "auto";
+    resultsEl.style.marginBottom = "12px";
+
+    const fieldsWrap = contentEl.createDiv();
+    fieldsWrap.style.display = "grid";
+    fieldsWrap.style.gridTemplateColumns = "1fr 1fr";
+    fieldsWrap.style.gap = "8px";
+    fieldsWrap.style.marginBottom = "12px";
+
+    const makeNumberField = (label, initial) => {
+      const wrap = fieldsWrap.createDiv();
+      const l = wrap.createEl("label", { text: label });
+      l.style.display = "block";
+      l.style.fontSize = "12px";
+      l.style.marginBottom = "4px";
+      const input = wrap.createEl("input", { type: "number" });
+      input.value = Number.isFinite(initial) ? String(initial) : "";
+      input.style.width = "100%";
+      return input;
+    };
+
+    const kcalInput = makeNumberField("kcal (per 100g)", current?.kcal);
+    const proteinInput = makeNumberField("Protein (g)", current?.protein);
+    const carbsInput = makeNumberField("Carbs (g)", current?.carbs);
+    const fatInput = makeNumberField("Fat (g)", current?.fat);
+
+    const applyEntry = (macros) => {
+      kcalInput.value = Number.isFinite(macros.kcal) ? String(macros.kcal) : "";
+      proteinInput.value = Number.isFinite(macros.protein) ? String(macros.protein) : "";
+      carbsInput.value = Number.isFinite(macros.carbs) ? String(macros.carbs) : "";
+      fatInput.value = Number.isFinite(macros.fat) ? String(macros.fat) : "";
+    };
+
+    const renderResults = (query) => {
+      resultsEl.empty();
+      const normalized = normalizeSearchText(query);
+      if (!normalized) return;
+      const entries = Array.isArray(this.options.entries) ? this.options.entries : [];
+      const matches = entries.filter(([pattern]) => pattern.includes(normalized)).slice(0, 20);
+      for (const [pattern, macros] of matches) {
+        const row = resultsEl.createDiv({ cls: "weekly-meal-shopper-entry-row" });
+        row.style.cursor = "pointer";
+        row.createEl("span", { text: `${pattern} — ${Math.round(macros.kcal)} kcal`, cls: "weekly-meal-shopper-entry-text" });
+        row.addEventListener("click", () => applyEntry(macros));
+      }
+    };
+    searchInput.addEventListener("input", () => renderResults(searchInput.value));
+
+    const buttons = contentEl.createDiv();
+    buttons.style.display = "flex";
+    buttons.style.justifyContent = "flex-end";
+    buttons.style.gap = "8px";
+
+    const cancelBtn = buttons.createEl("button", { text: "Cancel" });
+    const saveBtn = buttons.createEl("button", { text: "Save override" });
+    saveBtn.addClass("mod-cta");
+
+    const submit = () => {
+      const macros = {
+        kcal: Number(kcalInput.value) || 0,
+        protein: Number(proteinInput.value) || 0,
+        carbs: Number(carbsInput.value) || 0,
+        fat: Number(fatInput.value) || 0,
+      };
+      this.submitted = true;
+      this.options.onSubmit?.(macros);
+      this.close();
+    };
+
+    cancelBtn.addEventListener("click", () => {
+      this.submitted = true;
+      this.options.onCancel?.();
+      this.close();
+    });
+    saveBtn.addEventListener("click", submit);
   }
 
   onClose() {
@@ -5237,6 +5645,30 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "download-nutrition-dataset",
+      name: "Download nutrition dataset (USDA Foundation Foods)",
+      callback: async () => {
+        await this.downloadNutritionDataset();
+      },
+    });
+
+    this.addCommand({
+      id: "set-nutrition-match-for-ingredient",
+      name: "Set nutrition match for ingredient",
+      callback: async () => {
+        const result = await this.promptTextEntry({
+          title: "Set nutrition match",
+          label: "Ingredient name",
+          submitText: "Next",
+        });
+        if (result.cancelled) return;
+        const ingredient = String(result.value || "").trim();
+        if (!ingredient) return;
+        await this.openNutritionMatchModal(ingredient);
+      },
+    });
+
+    this.addCommand({
       id: "create-weekly-meal-prep-canvas",
       name: "Open or create meal plan canvas",
       callback: async () => {
@@ -5441,8 +5873,17 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.convertLiquidVolumeMeasuresToWeight = this.settings.convertLiquidVolumeMeasuresToWeight !== false;
     this.settings.energyUnit = normalizeEnergyUnit(this.settings.energyUnit);
     this.settings.macrosEnabled = this.settings.macrosEnabled === true;
+    this.settings.nutritionDatabaseSource = normalizeNutritionDatabaseSource(this.settings.nutritionDatabaseSource);
     this.settings.nutritionDatabasePath = String(this.settings.nutritionDatabasePath || "").trim();
+    this.settings.nutritionLiveLookupEnabled = this.settings.nutritionLiveLookupEnabled === true;
+    this.settings.nutritionLiveLookupProvider = normalizeNutritionLiveLookupProvider(this.settings.nutritionLiveLookupProvider);
+    this.settings.usdaApiKey = String(this.settings.usdaApiKey || "").trim();
     this.settings.householdSize = positiveNumberOr(this.settings.householdSize, 1);
+    this.settings.mealCoverageEnabled = this.settings.mealCoverageEnabled !== false;
+    this.settings.weekStartDay = normalizeWeekStartDay(this.settings.weekStartDay);
+    this.settings.coverageAcknowledgedShort = this.settings.coverageAcknowledgedShort && typeof this.settings.coverageAcknowledgedShort === "object"
+      ? this.settings.coverageAcknowledgedShort
+      : {};
     delete this.settings.cupShorthand;
     delete this.settings.tbspShorthand;
     delete this.settings.tspShorthand;
@@ -5522,8 +5963,14 @@ class WeeklyMealShopperPlugin extends Plugin {
     );
     this.settings.energyUnit = normalizeEnergyUnit(this.settings.energyUnit);
     this.settings.macrosEnabled = this.settings.macrosEnabled === true;
+    this.settings.nutritionDatabaseSource = normalizeNutritionDatabaseSource(this.settings.nutritionDatabaseSource);
     this.settings.nutritionDatabasePath = String(this.settings.nutritionDatabasePath || "").trim();
+    this.settings.nutritionLiveLookupEnabled = this.settings.nutritionLiveLookupEnabled === true;
+    this.settings.nutritionLiveLookupProvider = normalizeNutritionLiveLookupProvider(this.settings.nutritionLiveLookupProvider);
+    this.settings.usdaApiKey = String(this.settings.usdaApiKey || "").trim();
     this.settings.householdSize = positiveNumberOr(this.settings.householdSize, 1);
+    this.settings.mealCoverageEnabled = this.settings.mealCoverageEnabled !== false;
+    this.settings.weekStartDay = normalizeWeekStartDay(this.settings.weekStartDay);
     setActiveMeasurementProfile(this.settings);
     setActiveIngredientStorageSeparator(this.settings.ingredientStorageSeparator);
     setActiveRecipeViewIngredientDisplayTemplate(this.settings.recipeViewIngredientDisplayTemplate);
@@ -5594,6 +6041,7 @@ class WeeklyMealShopperPlugin extends Plugin {
       new Notice(error?.message || String(error));
       return null;
     }
+    templateContent = applyWeekStartDayToCanvasTemplate(templateContent, this.settings.weekStartDay);
     const created = await this.app.vault.create(
       canvasPath,
       templateContent.endsWith("\n") ? templateContent : `${templateContent}\n`
@@ -7715,7 +8163,12 @@ class WeeklyMealShopperPlugin extends Plugin {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter || {};
     const portionsPerCook = Math.max(1, parseNumberLike(fm.Portions ?? fm.Servings, 1));
-    const portionsPerMeal = positiveNumberOr(this.settings?.householdSize, 1);
+    // Optional per-recipe frontmatter override for recipes that don't need a
+    // full household-size portion per planned instance (e.g. a side of fruit
+    // where each person only really eats half a normal serving) — defaults
+    // to 1 (no change) when absent, so most recipes are unaffected.
+    const servingMultiplier = positiveNumberOr(fm.ServingMultiplier, 1);
+    const portionsPerMeal = positiveNumberOr(this.settings?.householdSize, 1) * servingMultiplier;
     const frozenAvailable = Math.max(0, parseNumberLike(fm.FrozenPortionsAvailable, 0));
     const useFrozenFirst = parseBooleanLike(fm.UseFrozenFirst, true);
 
@@ -7751,21 +8204,102 @@ class WeeklyMealShopperPlugin extends Plugin {
       counts.set(file.path, existing);
     }
 
+    // Second, geometric pass over `type: "file"` nodes only, used purely for
+    // the "cook again before <day> <meal>" callout and chronological sort —
+    // text-node-embedded recipe links don't get a day/meal instance.
+    const instancesByPath = new Map();
+    let canvasJson = null;
+    try {
+      canvasJson = JSON.parse(canvasText);
+    } catch {
+      canvasJson = null;
+    }
+    if (canvasJson && Array.isArray(canvasJson.nodes)) {
+      const groups = canvasJson.nodes.filter((n) => n && n.type === "group");
+      for (const node of canvasJson.nodes) {
+        if (!node || node.type !== "file" || typeof node.file !== "string") continue;
+        if (sectionForNode(node, groups) !== "default") continue;
+        const path = normalizePath(node.file);
+        if (!instancesByPath.has(path)) instancesByPath.set(path, []);
+        instancesByPath.get(path).push({
+          day: findContainingWeekdayLabel(node, groups),
+          mealType: findContainingMealTypeLabel(node, groups),
+        });
+      }
+    }
+
+    const startDay = this.settings?.weekStartDay;
+    const householdSize = positiveNumberOr(this.settings?.householdSize, 1);
+    const acknowledged = new Set((this.settings?.coverageAcknowledgedShort || {})[canvasFile.path] || []);
+    const staleAcknowledged = [];
+
     const rows = [];
     for (const { file, defaultCount } of counts.values()) {
       const recipePortions = this.getRecipePortions(file);
       const profile = this.getRecipePlanningProfile(file, defaultCount);
+      const rawStatus = classifyMealCoverageStatus(profile);
+
+      const instances = [...(instancesByPath.get(file.path) || [])]
+        .sort((a, b) => weekdayRank(a.day, startDay) - weekdayRank(b.day, startDay));
+
+      const coveragePerBatch = Math.floor(recipePortions / householdSize);
+      const nextCookInstance = rawStatus === "short" && instances.length > coveragePerBatch
+        ? instances[coveragePerBatch] || null
+        : null;
+
+      let status;
+      if (rawStatus === "covered") {
+        status = "green";
+        if (acknowledged.has(file.path)) staleAcknowledged.push(file.path);
+      } else {
+        status = acknowledged.has(file.path) ? "yellow" : "red";
+      }
+
       rows.push({
         file,
         plannedInstances: defaultCount,
         recipePortions,
-        householdSize: positiveNumberOr(this.settings?.householdSize, 1),
+        householdSize,
         cooksNeeded: profile.cooksNeeded,
-        status: classifyMealCoverageStatus(profile),
+        status,
+        nextCookInstance,
+        earliestDayRank: instances.length > 0 ? weekdayRank(instances[0].day, startDay) : 999,
       });
     }
 
+    if (staleAcknowledged.length > 0) {
+      await this.clearCoverageAcknowledgments(canvasFile, staleAcknowledged);
+    }
+
+    rows.sort((a, b) => {
+      const statusDiff = COVERAGE_STATUS_ORDER[a.status] - COVERAGE_STATUS_ORDER[b.status];
+      if (statusDiff !== 0) return statusDiff;
+      return a.earliestDayRank - b.earliestDayRank;
+    });
+
     return rows;
+  }
+
+  // Adds/removes recipePath from the acknowledged ("red -> yellow") set for
+  // this canvas and persists it.
+  async toggleCoverageAcknowledgment(canvasFile, recipePath) {
+    const map = { ...(this.settings.coverageAcknowledgedShort || {}) };
+    const set = new Set(map[canvasFile.path] || []);
+    if (set.has(recipePath)) set.delete(recipePath); else set.add(recipePath);
+    map[canvasFile.path] = [...set];
+    this.settings.coverageAcknowledgedShort = map;
+    await this.saveSettings();
+  }
+
+  // Drops stale acknowledgment entries once a recipe is fully covered again,
+  // so a future short-again occurrence starts back at red.
+  async clearCoverageAcknowledgments(canvasFile, recipePaths) {
+    const map = { ...(this.settings.coverageAcknowledgedShort || {}) };
+    const set = new Set(map[canvasFile.path] || []);
+    for (const path of recipePaths) set.delete(path);
+    map[canvasFile.path] = [...set];
+    this.settings.coverageAcknowledgedShort = map;
+    await this.saveSettings();
   }
 
   // Writes green/red onto each plain-weekly-section recipe card's `color`
@@ -7788,8 +8322,8 @@ class WeeklyMealShopperPlugin extends Plugin {
     }
     if (!Array.isArray(canvas.nodes)) return;
 
-    const COLOR_COVERED = "4"; // Obsidian canvas preset green
-    const COLOR_SHORT = "1"; // Obsidian canvas preset red
+    // Obsidian canvas preset colors: "1" red, "3" yellow, "4" green.
+    const COVERAGE_NODE_COLOR = { red: "1", yellow: "3", green: "4" };
     const statusByPath = new Map(rows.map((r) => [r.file.path, r.status]));
     const groups = canvas.nodes.filter((n) => n && n.type === "group");
 
@@ -7798,8 +8332,8 @@ class WeeklyMealShopperPlugin extends Plugin {
       if (!node || node.type !== "file" || typeof node.file !== "string") continue;
       if (sectionForNode(node, groups) !== "default") continue;
       const status = statusByPath.get(normalizePath(node.file));
-      if (!status) continue;
-      const desiredColor = status === "short" ? COLOR_SHORT : COLOR_COVERED;
+      const desiredColor = COVERAGE_NODE_COLOR[status];
+      if (!desiredColor) continue;
       if (node.color !== desiredColor) {
         node.color = desiredColor;
         changed = true;
@@ -7821,6 +8355,7 @@ class WeeklyMealShopperPlugin extends Plugin {
   // stops being this canvas.
   handleActiveLeafChangeForCoverage(leaf) {
     this.teardownMealCoverageOverlay();
+    if (this.settings?.mealCoverageEnabled === false) return;
     const file = leaf?.view?.file;
     if (!(file instanceof TFile) || file.extension !== "canvas") return;
     this.activeCoverageCanvasFile = file;
@@ -7875,23 +8410,40 @@ class WeeklyMealShopperPlugin extends Plugin {
       return;
     }
 
-    const householdSize = positiveNumberOr(this.settings?.householdSize, 1);
+    const canvasFile = this.activeCoverageCanvasFile;
     for (const row of rows) {
-      const rowEl = listEl.createDiv({ cls: `weekly-meal-shopper-coverage-row is-${row.status}` });
+      const clickable = row.status !== "green";
+      const rowEl = listEl.createDiv({
+        cls: `weekly-meal-shopper-coverage-row is-${row.status}${clickable ? " is-clickable" : ""}`,
+      });
       rowEl.createDiv({ cls: "weekly-meal-shopper-coverage-dot" });
       const textEl = rowEl.createDiv({ cls: "weekly-meal-shopper-coverage-text" });
       textEl.createDiv({ cls: "weekly-meal-shopper-coverage-name", text: row.file.basename });
-      const coverage = row.recipePortions / householdSize;
-      textEl.createDiv({
-        cls: "weekly-meal-shopper-coverage-detail",
-        text: `${formatMetricAmount(row.recipePortions)} portions ÷ ${formatMetricAmount(householdSize)} household = covers ${formatMetricAmount(coverage)} meal(s)`,
-      });
-      textEl.createDiv({
-        cls: "weekly-meal-shopper-coverage-detail",
-        text: row.status === "short"
-          ? `planned ${row.plannedInstances}× this week → ${row.cooksNeeded} batches needed`
-          : `planned ${row.plannedInstances}× this week → covered by 1 batch`,
-      });
+      if (clickable) {
+        const dayLabel = row.nextCookInstance?.day ? WEEKDAY_DISPLAY_NAMES[row.nextCookInstance.day] : null;
+        const cookAgainText = dayLabel ? `Cook again: ${dayLabel}` : "Cook again";
+        textEl.createDiv({ cls: "weekly-meal-shopper-coverage-detail weekly-meal-shopper-coverage-cook-again", text: cookAgainText });
+      }
+
+      if (clickable && canvasFile) {
+        rowEl.setAttribute("role", "button");
+        rowEl.setAttribute("tabindex", "0");
+        rowEl.setAttribute(
+          "aria-label",
+          row.status === "yellow" ? "Click to unacknowledge" : "Click to acknowledge — needs cooking again, but that's fine"
+        );
+        const activate = async () => {
+          await this.toggleCoverageAcknowledgment(canvasFile, row.file.path);
+          await this.refreshMealCoverageOverlay();
+        };
+        rowEl.addEventListener("click", activate);
+        rowEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            activate();
+          }
+        });
+      }
     }
   }
 
@@ -8012,7 +8564,15 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     const portions = this.getRecipePortions(file);
     await this.loadNutritionConfig();
+    // Pre-warms NUTRITION_ENTRIES for anything not found locally, so the pure
+    // computeRecipeMacros call below can resolve it without knowing live
+    // lookup exists. If a live lookup fails, computeRecipeMacros will still
+    // raise its own "no-nutrition-data" finding for that ingredient — the two
+    // findings together tell the full story (not found locally, and the live
+    // fallback also came up empty) rather than one being suppressed.
+    const liveLookupFindings = await this.resolveMissingIngredientsViaLiveLookup(ingredients);
     const { perServing, findings } = computeRecipeMacros(ingredients, portions);
+    findings.push(...liveLookupFindings);
 
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       frontmatter.MacroKcalPerServing = Number(perServing.kcal.toFixed(1));
@@ -8154,43 +8714,255 @@ class WeeklyMealShopperPlugin extends Plugin {
     );
   }
 
-  // If settings.nutritionDatabasePath is set, that file takes priority over
-  // the bundled default; falls back to the bundled default on a missing file
-  // or invalid JSON at either location.
-  async loadNutritionConfig() {
-    await this.ensureNutritionConfigFile();
-    const customPath = String(this.settings.nutritionDatabasePath || "").trim();
+  async ensureLiveNutritionCacheFile() {
+    const configPath = normalizePath(LIVE_NUTRITION_CACHE_PATH);
+    const exists = await this.app.vault.adapter.exists(configPath);
+    if (exists) return;
+    await this.app.vault.adapter.write(configPath, `${JSON.stringify({ entries: {} }, null, 2)}\n`);
+  }
 
-    if (customPath) {
-      const normalizedCustomPath = normalizePath(customPath);
-      const customExists = await this.app.vault.adapter.exists(normalizedCustomPath);
-      if (customExists) {
-        try {
-          const raw = await this.app.vault.adapter.read(normalizedCustomPath);
-          const parsed = JSON.parse(raw);
-          NUTRITION_ENTRIES = buildNutritionEntries(parsed);
-          return parsed;
-        } catch (error) {
-          console.error("[weekly-meal-shopper] Failed to parse custom nutrition database:", error);
-          new Notice("Custom nutrition database is invalid JSON. Using built-in defaults.");
-        }
-      } else {
-        new Notice(`Custom nutrition database not found: ${customPath}. Using built-in defaults.`);
-      }
-    }
-
-    const configPath = normalizePath(NUTRITION_CONFIG_PATH);
+  async loadLiveNutritionCacheEntries() {
+    await this.ensureLiveNutritionCacheFile();
+    const configPath = normalizePath(LIVE_NUTRITION_CACHE_PATH);
     try {
       const raw = await this.app.vault.adapter.read(configPath);
       const parsed = JSON.parse(raw);
-      NUTRITION_ENTRIES = buildNutritionEntries(parsed);
-      return parsed;
+      return parsed && typeof parsed.entries === "object" && parsed.entries ? parsed.entries : {};
     } catch (error) {
-      console.error("[weekly-meal-shopper] Failed to parse nutrition database config:", error);
-      NUTRITION_ENTRIES = buildNutritionEntries(DEFAULT_NUTRITION_CONFIG);
-      new Notice("Nutrition database config is invalid JSON. Using built-in defaults.");
-      return DEFAULT_NUTRITION_CONFIG;
+      console.error("[weekly-meal-shopper] Failed to parse live nutrition cache:", error);
+      return {};
     }
+  }
+
+  async ensureNutritionOverridesFile() {
+    const configPath = normalizePath(NUTRITION_OVERRIDES_PATH);
+    const exists = await this.app.vault.adapter.exists(configPath);
+    if (exists) return;
+    await this.app.vault.adapter.write(configPath, `${JSON.stringify({ entries: {} }, null, 2)}\n`);
+  }
+
+  async loadNutritionOverrideEntries() {
+    await this.ensureNutritionOverridesFile();
+    const configPath = normalizePath(NUTRITION_OVERRIDES_PATH);
+    try {
+      const raw = await this.app.vault.adapter.read(configPath);
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed.entries === "object" && parsed.entries ? parsed.entries : {};
+    } catch (error) {
+      console.error("[weekly-meal-shopper] Failed to parse nutrition overrides:", error);
+      return {};
+    }
+  }
+
+  // Sets (or replaces) a manual ingredient->macro match, taking priority over
+  // every other source next time loadNutritionConfig runs.
+  async saveNutritionOverride(name, macros) {
+    const key = normalizeSearchText(name);
+    if (!key) return;
+    const entries = await this.loadNutritionOverrideEntries();
+    entries[key] = macros;
+    await this.app.vault.adapter.write(normalizePath(NUTRITION_OVERRIDES_PATH), `${JSON.stringify({ entries }, null, 2)}\n`);
+  }
+
+  async removeNutritionOverride(name) {
+    const key = normalizeSearchText(name);
+    const entries = await this.loadNutritionOverrideEntries();
+    delete entries[key];
+    await this.app.vault.adapter.write(normalizePath(NUTRITION_OVERRIDES_PATH), `${JSON.stringify({ entries }, null, 2)}\n`);
+  }
+
+  // Opens the manual-match modal for one ingredient, pre-filled with
+  // whatever it currently resolves to (if anything). Resolves with the saved
+  // macros, or null if cancelled.
+  async openNutritionMatchModal(ingredient) {
+    await this.loadNutritionConfig();
+    const currentMacros = estimateIngredientMacrosPer100g(ingredient);
+    return await new Promise((resolve) => {
+      new NutritionMatchModal(this.app, {
+        ingredient,
+        currentMacros,
+        entries: NUTRITION_ENTRIES,
+        onSubmit: async (macros) => {
+          await this.saveNutritionOverride(ingredient, macros);
+          await this.loadNutritionConfig();
+          new Notice(`Nutrition match saved for "${ingredient}".`);
+          resolve(macros);
+        },
+        onCancel: () => resolve(null),
+      }).open();
+    });
+  }
+
+  // Loads whichever primary source settings.nutritionDatabaseSource selects
+  // ("builtin" | "downloaded" | "custom", each falling back to the bundled
+  // default on a missing file or invalid JSON), merges the live-lookup cache
+  // on top (fills gaps only), then manual overrides on top of that (highest
+  // priority — wins over both the primary source and the cache).
+  async loadNutritionConfig() {
+    await this.ensureNutritionConfigFile();
+    const source = normalizeNutritionDatabaseSource(this.settings.nutritionDatabaseSource);
+    let primaryConfig = null;
+
+    if (source === "custom") {
+      const customPath = String(this.settings.nutritionDatabasePath || "").trim();
+      if (customPath) {
+        const normalizedCustomPath = normalizePath(customPath);
+        const customExists = await this.app.vault.adapter.exists(normalizedCustomPath);
+        if (customExists) {
+          try {
+            primaryConfig = JSON.parse(await this.app.vault.adapter.read(normalizedCustomPath));
+          } catch (error) {
+            console.error("[weekly-meal-shopper] Failed to parse custom nutrition database:", error);
+            new Notice("Custom nutrition database is invalid JSON. Using built-in defaults.");
+          }
+        } else {
+          new Notice(`Custom nutrition database not found: ${customPath}. Using built-in defaults.`);
+        }
+      } else {
+        new Notice("No custom nutrition database path set. Using built-in defaults.");
+      }
+    } else if (source === "downloaded") {
+      const configPath = normalizePath(DOWNLOADED_NUTRITION_CONFIG_PATH);
+      const exists = await this.app.vault.adapter.exists(configPath);
+      if (exists) {
+        try {
+          primaryConfig = JSON.parse(await this.app.vault.adapter.read(configPath));
+        } catch (error) {
+          console.error("[weekly-meal-shopper] Failed to parse downloaded nutrition database:", error);
+          new Notice("Downloaded nutrition database is invalid JSON. Using built-in defaults.");
+        }
+      } else {
+        new Notice("No downloaded nutrition database yet — run \"Download nutrition dataset\" first. Using built-in defaults.");
+      }
+    }
+
+    if (!primaryConfig) {
+      const configPath = normalizePath(NUTRITION_CONFIG_PATH);
+      try {
+        primaryConfig = JSON.parse(await this.app.vault.adapter.read(configPath));
+      } catch (error) {
+        console.error("[weekly-meal-shopper] Failed to parse nutrition database config:", error);
+        new Notice("Nutrition database config is invalid JSON. Using built-in defaults.");
+        primaryConfig = DEFAULT_NUTRITION_CONFIG;
+      }
+    }
+
+    const cacheEntries = await this.loadLiveNutritionCacheEntries();
+    const overrideEntries = await this.loadNutritionOverrideEntries();
+    const primaryEntries = primaryConfig && typeof primaryConfig.entries === "object" ? primaryConfig.entries : {};
+    NUTRITION_ENTRIES = buildNutritionEntries({ entries: { ...cacheEntries, ...primaryEntries, ...overrideEntries } });
+    return primaryConfig;
+  }
+
+  // Fetches the USDA Foundation Foods bulk JSON dataset, extracts it from its
+  // ZIP wrapper, and writes it to DOWNLOADED_NUTRITION_CONFIG_PATH. Desktop
+  // only — ZIP decompression needs Node's zlib, unavailable on mobile.
+  async downloadNutritionDataset() {
+    if (Platform.isMobileApp) {
+      new Notice("Downloading bulk nutrition datasets isn't available on mobile. Use live lookup or a custom database file instead.");
+      return;
+    }
+
+    new Notice("Downloading USDA Foundation Foods dataset…");
+    let response;
+    try {
+      response = await requestUrl({ url: FOUNDATION_FOODS_ZIP_URL });
+    } catch (error) {
+      new Notice(`Download failed: ${error?.message || error}`);
+      return;
+    }
+
+    let jsonText;
+    try {
+      const zipBuffer = Buffer.from(response.arrayBuffer);
+      jsonText = extractFirstFileFromZip(zipBuffer).toString("utf8");
+    } catch (error) {
+      new Notice(`Could not read the downloaded ZIP file: ${error?.message || error}`);
+      return;
+    }
+
+    let config;
+    try {
+      config = parseUsdaBulkDatasetToNutritionConfig(JSON.parse(jsonText));
+    } catch (error) {
+      new Notice(`Could not parse the downloaded dataset: ${error?.message || error}`);
+      return;
+    }
+
+    const entryCount = Object.keys(config.entries).length;
+    if (entryCount === 0) {
+      new Notice("Downloaded dataset parsed but contained no usable entries — the USDA JSON format may have changed.");
+      return;
+    }
+
+    await this.app.vault.adapter.write(
+      normalizePath(DOWNLOADED_NUTRITION_CONFIG_PATH),
+      `${JSON.stringify(config, null, 2)}\n`
+    );
+    new Notice(`Downloaded nutrition dataset saved (${entryCount} ingredients). Set "Nutrition database source" to "Downloaded" to use it.`);
+  }
+
+  // Dispatches to whichever provider settings.nutritionLiveLookupProvider
+  // selects. Returns null on any failure — see the individual provider
+  // functions for their own null-on-failure contract.
+  async lookupIngredientMacrosLive(name) {
+    const provider = normalizeNutritionLiveLookupProvider(this.settings.nutritionLiveLookupProvider);
+    if (provider === "openfoodfacts") return lookupIngredientMacrosFromOpenFoodFacts(name);
+    return lookupIngredientMacrosFromUsda(name, this.settings.usdaApiKey);
+  }
+
+  // Persists one live-lookup result to nutrition-live-cache.json AND merges
+  // it into the in-memory NUTRITION_ENTRIES immediately, so the rest of the
+  // current calculation (and every one after, without a repeat network call)
+  // can resolve it via the normal estimateIngredientMacrosPer100g path.
+  async cacheLiveNutritionEntry(name, macros) {
+    const key = normalizeSearchText(name);
+    if (!key) return;
+
+    const cacheEntries = await this.loadLiveNutritionCacheEntries();
+    cacheEntries[key] = macros;
+    await this.app.vault.adapter.write(
+      normalizePath(LIVE_NUTRITION_CACHE_PATH),
+      `${JSON.stringify({ entries: cacheEntries }, null, 2)}\n`
+    );
+
+    // Re-sort so the newly added (possibly longer/more specific) pattern is
+    // checked at the right point relative to existing entries.
+    NUTRITION_ENTRIES = [...NUTRITION_ENTRIES, [key, macros]]
+      .sort((a, b) => b[0].length - a[0].length);
+  }
+
+  // For every ingredient not already resolvable from the active local
+  // dataset, tries a live lookup (if enabled) and caches the result. Returns
+  // findings for lookups that came up empty — never throws, so one bad
+  // ingredient never aborts the rest of the recipe's macro calculation.
+  async resolveMissingIngredientsViaLiveLookup(ingredients) {
+    if (!this.settings.nutritionLiveLookupEnabled) return [];
+
+    const findings = [];
+    const items = Array.isArray(ingredients) ? ingredients : [];
+    for (const item of items) {
+      if (item?.quantityUnknown) continue;
+      if (estimateIngredientMacrosPer100g(item.name)) continue;
+
+      let macros = null;
+      try {
+        macros = await this.lookupIngredientMacrosLive(item.name);
+      } catch (error) {
+        console.error("[weekly-meal-shopper] Live nutrition lookup failed:", error);
+      }
+
+      if (macros) {
+        await this.cacheLiveNutritionEntry(item.name, macros);
+      } else {
+        findings.push({
+          severity: "warning",
+          type: "live-lookup-failed",
+          message: `Live lookup found no match for "${item.name}".`,
+        });
+      }
+    }
+    return findings;
   }
 
   async ensureUnitAliasConfigFile() {
@@ -8648,6 +9420,19 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       );
 
     new Setting(mealPrepBody)
+      .setName("Meal Coverage canvas overlay")
+      .setDesc("Shows a live coverage panel directly on the meal-plan canvas (portions vs. household size, cook-again warnings) and colors recipe cards green/yellow/red to match.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.mealCoverageEnabled !== false)
+          .onChange(async (value) => {
+            this.plugin.settings.mealCoverageEnabled = value;
+            await this.plugin.saveSettings();
+            this.plugin.handleActiveLeafChangeForCoverage(this.app.workspace.activeLeaf);
+          })
+      );
+
+    new Setting(mealPrepBody)
       .setName("Show recipe usage in shopping list")
       .setDesc("Adds an indented recipe-link line under each generated shopping item.")
       .addToggle((toggle) =>
@@ -9011,7 +9796,8 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       description: "Macro tracking (protein/carbs/fat/kcal).",
     });
 
-    this.renderNutritionSettingsSection(containerEl);
+    const nutritionOverrideEntries = await this.plugin.loadNutritionOverrideEntries();
+    this.renderNutritionSettingsSection(containerEl, nutritionOverrideEntries);
 
     this.renderCategoryHeading(containerEl, {
       title: "First-Time Setup",
@@ -9103,6 +9889,21 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       );
 
     new Setting(firstTimeSetupBody)
+      .setName("Week starts on")
+      .setDesc("Which day sits at the left edge of a newly created meal-plan canvas, and the reference point for Meal Coverage's chronological sorting and 'cook again before' callouts. Only affects canvases created after changing this — existing canvases are left as-is.")
+      .addDropdown((dropdown) => {
+        for (const day of WEEKDAY_NAMES) {
+          dropdown.addOption(day, WEEKDAY_DISPLAY_NAMES[day]);
+        }
+        dropdown
+          .setValue(normalizeWeekStartDay(this.plugin.settings.weekStartDay))
+          .onChange(async (value) => {
+            this.plugin.settings.weekStartDay = normalizeWeekStartDay(value);
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(firstTimeSetupBody)
       .setName("Shopping list output note")
       .setDesc("Markdown note path that will be overwritten each generation.")
       .addText((text) =>
@@ -9181,7 +9982,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       );
   }
 
-  renderNutritionSettingsSection(containerEl) {
+  renderNutritionSettingsSection(containerEl, nutritionOverrideEntries = {}) {
     const { body } = this.buildFoldableSection(containerEl, {
       stateKey: "nutritionSectionCollapsed",
       title: "Nutrition & Macros",
@@ -9214,16 +10015,21 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           })
       );
 
+    const source = normalizeNutritionDatabaseSource(this.plugin.settings.nutritionDatabaseSource);
+
     new Setting(body)
-      .setName("Custom nutrition database path (optional)")
-      .setDesc("Vault-relative path to a JSON file shaped like the bundled nutrition-database.json. Leave empty to use the bundled default.")
-      .addText((text) =>
-        text
-          .setPlaceholder("Leave empty for the bundled default")
-          .setValue(this.plugin.settings.nutritionDatabasePath || "")
+      .setName("Nutrition database source")
+      .setDesc("Which local dataset ingredient lookups use. \"Downloaded\" and \"Custom file\" each show their own extra controls below once selected.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("builtin", "Built-in (~130 common ingredients)")
+          .addOption("downloaded", "Downloaded (USDA Foundation Foods)")
+          .addOption("custom", "Custom file")
+          .setValue(source)
           .onChange(async (value) => {
-            this.plugin.settings.nutritionDatabasePath = String(value || "").trim();
+            this.plugin.settings.nutritionDatabaseSource = normalizeNutritionDatabaseSource(value);
             await this.plugin.saveSettings();
+            await this.display();
           })
       )
       .addButton((btn) =>
@@ -9231,6 +10037,134 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           const config = await this.plugin.loadNutritionConfig();
           const count = config && typeof config.entries === "object" ? Object.keys(config.entries).length : 0;
           new Notice(`Nutrition database reloaded (${count} ingredient(s)).`);
+        })
+      );
+
+    if (source === "custom") {
+      new Setting(body)
+        .setName("Custom nutrition database path")
+        .setDesc("Vault-relative path to a JSON file shaped like the bundled nutrition-database.json.")
+        .addText((text) =>
+          text
+            .setPlaceholder("Utility/my-nutrition-database.json")
+            .setValue(this.plugin.settings.nutritionDatabasePath || "")
+            .onChange(async (value) => {
+              this.plugin.settings.nutritionDatabasePath = String(value || "").trim();
+              await this.plugin.saveSettings();
+            })
+        );
+    }
+
+    if (source === "downloaded") {
+      new Setting(body)
+        .setName("Download nutrition dataset")
+        .setDesc(
+          Platform.isMobileApp
+            ? "Not available on mobile (needs desktop-only ZIP decompression). Use live lookup or a custom file instead."
+            : "Fetches USDA's Foundation Foods dataset (~2,000 ingredients, public domain) and stores it locally — no network needed afterward."
+        )
+        .addButton((btn) => {
+          btn.setButtonText("Download now").onClick(async () => {
+            await this.plugin.downloadNutritionDataset();
+          });
+          if (Platform.isMobileApp) btn.setDisabled(true);
+        });
+    }
+
+    this.renderCategoryHeading(body, {
+      title: "Live lookup fallback",
+      description: "For ingredients not found in the local dataset above, query an online provider once and cache the result.",
+    });
+
+    new Setting(body)
+      .setName("Enable live lookup")
+      .setDesc("Works alongside any database source above — only used for ingredients the local dataset doesn't have.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.nutritionLiveLookupEnabled === true)
+          .onChange(async (value) => {
+            this.plugin.settings.nutritionLiveLookupEnabled = value;
+            await this.plugin.saveSettings();
+            await this.display();
+          })
+      );
+
+    if (this.plugin.settings.nutritionLiveLookupEnabled === true) {
+      const provider = normalizeNutritionLiveLookupProvider(this.plugin.settings.nutritionLiveLookupProvider);
+
+      new Setting(body)
+        .setName("Live lookup provider")
+        .setDesc("USDA is more reliable for generic ingredients (a proper composition database); Open Food Facts needs no API key but is a branded-product database, so results for plain ingredient names are less predictable.")
+        .addDropdown((dropdown) =>
+          dropdown
+            .addOption("usda", "USDA FoodData Central")
+            .addOption("openfoodfacts", "Open Food Facts")
+            .setValue(provider)
+            .onChange(async (value) => {
+              this.plugin.settings.nutritionLiveLookupProvider = normalizeNutritionLiveLookupProvider(value);
+              await this.plugin.saveSettings();
+              await this.display();
+            })
+        );
+
+      if (provider === "usda") {
+        new Setting(body)
+          .setName("USDA API key")
+          .setDesc("Free — sign up at fdc.nal.usda.gov/api-key-signup.")
+          .addText((text) => {
+            text.inputEl.type = "password";
+            text
+              .setPlaceholder("Paste your USDA API key")
+              .setValue(this.plugin.settings.usdaApiKey || "")
+              .onChange(async (value) => {
+                this.plugin.settings.usdaApiKey = String(value || "").trim();
+                await this.plugin.saveSettings();
+              });
+          });
+      }
+    }
+
+    this.renderCategoryHeading(body, {
+      title: "Manual matches",
+      description: "Pin a specific ingredient to a fixed per-100g value — wins over the database source and live lookup above.",
+    });
+
+    const overridesListEl = body.createDiv({ cls: "weekly-meal-shopper-entry-list" });
+    const overrideNames = Object.keys(nutritionOverrideEntries || {});
+    if (overrideNames.length === 0) {
+      overridesListEl.createDiv({ text: "No manual matches yet.", cls: "weekly-meal-shopper-empty" });
+    } else {
+      for (const name of overrideNames) {
+        const macros = nutritionOverrideEntries[name];
+        const row = overridesListEl.createDiv({ cls: "weekly-meal-shopper-entry-row" });
+        row.createEl("span", {
+          text: `${name} — ${Math.round(macros?.kcal || 0)} kcal, ${Math.round(macros?.protein || 0)}g protein, ${Math.round(macros?.carbs || 0)}g carbs, ${Math.round(macros?.fat || 0)}g fat`,
+          cls: "weekly-meal-shopper-entry-text",
+        });
+        const removeBtn = row.createEl("button", { text: "Remove", cls: "weekly-meal-shopper-remove-btn" });
+        removeBtn.addEventListener("click", async () => {
+          await this.plugin.removeNutritionOverride(name);
+          await this.plugin.loadNutritionConfig();
+          await this.display();
+        });
+      }
+    }
+
+    new Setting(body)
+      .setName("Add manual match")
+      .setDesc("Search the active database or type values by hand for a specific ingredient name.")
+      .addButton((btn) =>
+        btn.setButtonText("Add").onClick(async () => {
+          const result = await this.plugin.promptTextEntry({
+            title: "Set nutrition match",
+            label: "Ingredient name",
+            submitText: "Next",
+          });
+          if (result.cancelled) return;
+          const ingredient = String(result.value || "").trim();
+          if (!ingredient) return;
+          await this.plugin.openNutritionMatchModal(ingredient);
+          await this.display();
         })
       );
   }
@@ -9645,3 +10579,5 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 }
 
 module.exports = WeeklyMealShopperPlugin;
+
+/* nosourcemap */
