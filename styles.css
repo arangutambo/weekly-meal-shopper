@@ -317,3 +317,72 @@
     padding-right: 0;
   }
 }
+
+/* Meal Coverage overlay — floats directly inside the canvas view (same DOM
+   layer as Obsidian's built-in zoom/undo toolbar), not a sidebar pane. */
+.weekly-meal-shopper-coverage-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  max-width: 300px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-s);
+  padding: 10px 12px;
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.weekly-meal-shopper-coverage-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-normal);
+}
+
+.weekly-meal-shopper-coverage-empty {
+  color: var(--text-faint);
+}
+
+.weekly-meal-shopper-coverage-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.weekly-meal-shopper-coverage-row:first-of-type {
+  border-top: none;
+}
+
+.weekly-meal-shopper-coverage-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+  background: var(--color-red);
+}
+
+.weekly-meal-shopper-coverage-row.is-covered .weekly-meal-shopper-coverage-dot {
+  background: var(--color-green);
+}
+
+.weekly-meal-shopper-coverage-text {
+  min-width: 0;
+}
+
+.weekly-meal-shopper-coverage-name {
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow-wrap: break-word;
+}
+
+.weekly-meal-shopper-coverage-detail {
+  color: var(--text-muted);
+  overflow-wrap: break-word;
+}

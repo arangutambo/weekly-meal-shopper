@@ -63,9 +63,10 @@ const DEFAULT_SETTINGS = {
   macrosEnabled: false,
   energyUnit: "kcal", // "kcal" | "kJ" — independent of measurementPreference/measurementPreset
   nutritionDatabasePath: "", // "" = use the bundled nutrition-database.json
-  // Household members for family/multi-person meal planning. Plain name
-  // strings, used only for autocomplete/labeling convenience — never a gate.
-  familyMembers: [],
+  // How many portions a single planned instance of a recipe needs to feed —
+  // replaces the old per-recipe PortionsPerMeal field. Drives both weekly
+  // batch-scaling and the Meal Coverage canvas overlay.
+  householdSize: 1,
   settingsSectionState: {
     firstTimeSetupCollapsed: false,
     mealPrepSetupCollapsed: false,
@@ -77,7 +78,6 @@ const DEFAULT_SETTINGS = {
     excludeIngredientsCollapsed: false,
     ingredientOverridesCollapsed: false,
     nutritionSectionCollapsed: false,
-    familySectionCollapsed: false,
   },
 };
 
@@ -100,7 +100,6 @@ Cost:
 RecipeRating: 3
 MealPrep: false
 WeekDay: false
-PortionsPerMeal: 1
 FrozenPortionsAvailable: 0
 UseFrozenFirst: true
 TrackMacros: false
@@ -684,6 +683,37 @@ const DRIED_LEGUME_DENSITY_G_PER_ML = 0.8; // bulk density for the storage-volum
 function positiveNumberOr(value, fallback) {
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+// Pure batch-scaling math shared by getRecipePlanningProfile and the Meal
+// Coverage canvas overlay. portionsPerMeal is normally settings.householdSize
+// (how many portions one planned instance needs to feed).
+function computePlanningProfile({ portionsPerCook, portionsPerMeal, frozenAvailable, useFrozenFirst, plannedInstances }) {
+  const plannedPortions = plannedInstances * portionsPerMeal;
+  const frozenUsed = useFrozenFirst ? Math.min(frozenAvailable, plannedPortions) : 0;
+  const portionsNeedingCook = Math.max(0, plannedPortions - frozenUsed);
+  const cooksNeeded = portionsNeedingCook > 0 ? Math.ceil(portionsNeedingCook / portionsPerCook) : 0;
+  const cookedPortions = cooksNeeded * portionsPerCook;
+  const projectedFrozen = Math.max(0, frozenAvailable - frozenUsed + Math.max(0, cookedPortions - portionsNeedingCook));
+
+  return {
+    portionsPerCook,
+    portionsPerMeal,
+    frozenAvailable,
+    useFrozenFirst,
+    plannedPortions,
+    frozenUsed,
+    portionsNeedingCook,
+    cooksNeeded,
+    projectedFrozen,
+  };
+}
+
+// "covered" = a single cook this week satisfies everything currently planned
+// for this recipe (cooksNeeded <= 1); "short" = you'll need to cook it more
+// than once this week to meet the plan.
+function classifyMealCoverageStatus(profile) {
+  return profile && profile.cooksNeeded > 1 ? "short" : "covered";
 }
 
 // Accepts either raw settings (legume* keys) or short opts (gramsDriedPerCan …)
@@ -1742,39 +1772,6 @@ function buildMacroCalculationReport(recipeReports, totalRecipes = 0) {
   }
 
   return lines.join("\n").trimEnd() + "\n";
-}
-
-// Groups per-recipe family-serving rows (each { person, file, servings, macros }
-// collected by generateWeeklyShoppingList from "Family: <name>" canvas groups)
-// by person and renders the "## Family Meal Plan" report lines. macros is only
-// present when the recipe has TrackMacros: true and cached frontmatter macro
-// values — read directly, never recomputed here.
-function buildFamilyMealPlanLines(rows, energyUnit = ACTIVE_ENERGY_UNIT) {
-  const list = Array.isArray(rows) ? rows : [];
-  if (list.length === 0) return ["- None"];
-
-  const byPerson = new Map();
-  for (const row of list) {
-    if (!row?.person) continue;
-    if (!byPerson.has(row.person)) byPerson.set(row.person, []);
-    byPerson.get(row.person).push(row);
-  }
-
-  const unit = normalizeEnergyUnit(energyUnit);
-  const lines = [];
-  for (const [person, personRows] of byPerson) {
-    lines.push(`### ${person}`);
-    for (const row of personRows) {
-      const servingsLabel = `${formatMetricAmount(row.servings)} serving(s)`;
-      let macroLabel = "macros not tracked for this recipe";
-      if (row.macros) {
-        const energy = convertKcalToDisplayEnergy(row.macros.kcal, unit);
-        macroLabel = `${Math.round(energy)} ${unit}, ${Math.round(row.macros.protein)}g protein, ${Math.round(row.macros.carbs)}g carbs, ${Math.round(row.macros.fat)}g fat per serving`;
-      }
-      lines.push(`- [[${row.file.path}|${row.file.basename}]]: ${servingsLabel} (${macroLabel})`);
-    }
-  }
-  return lines;
 }
 
 function parseAmountToken(token) {
@@ -3186,23 +3183,6 @@ function normalizeExactExclusionList(values) {
     .filter(Boolean);
 }
 
-// Household member names for family/multi-person meal planning. Convenience
-// list only (autocomplete/labeling) — case-insensitively deduplicated.
-function normalizeFamilyMembersList(values) {
-  if (!Array.isArray(values)) return [];
-  const seen = new Set();
-  const out = [];
-  for (const raw of values) {
-    const name = String(raw || "").trim();
-    if (!name) continue;
-    const key = normalizeSearchText(name);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(name);
-  }
-  return out;
-}
-
 function parseExcludedIngredients(lines) {
   const values = Array.isArray(lines) ? lines : [];
   const map = new Map();
@@ -4164,21 +4144,11 @@ function getNodeCenter(node) {
   return { x: x + width / 2, y: y + height / 2 };
 }
 
-// Returns { type: "project"|"hosting"|"family"|"default", person?: string }.
-// A group labeled "Family: <name>" (case-insensitive) is how a canvas group is
-// assigned to a named household member, without any change to the .canvas
-// JSON schema itself — same freeform-label-text mechanism "project"/"hosting"
-// already use.
 function classifySectionLabel(label) {
-  const raw = String(label || "");
-  const l = raw.toLowerCase();
-  // Match against the original-case label so the captured person name keeps
-  // its casing (e.g. "Family: Alice" -> "Alice", not "alice").
-  const familyMatch = raw.match(/family\s*:\s*(.+)/i);
-  if (familyMatch) return { type: "family", person: familyMatch[1].trim() };
-  if (l.includes("project")) return { type: "project" };
-  if (l.includes("hosting")) return { type: "hosting" };
-  return { type: "default" };
+  const l = String(label || "").toLowerCase();
+  if (l.includes("project")) return "project";
+  if (l.includes("hosting")) return "hosting";
+  return "default";
 }
 
 function sectionForNode(node, groups) {
@@ -4195,10 +4165,10 @@ function sectionForNode(node, groups) {
 
   for (const g of containing) {
     const section = classifySectionLabel(g.label);
-    if (section.type !== "default") return section;
+    if (section !== "default") return section;
   }
 
-  return { type: "default" };
+  return "default";
 }
 
 function parseCanvasRecipeEntries(canvasText) {
@@ -4885,18 +4855,6 @@ class RecipeCardModal extends Modal {
     addBtn("Add To Weekly Plan", async () => this.plugin.addRecipeToCanvas(this.file.path, "default"));
     addBtn("Add As Project", async () => this.plugin.addRecipeToCanvas(this.file.path, "project"));
     addBtn("Add As Hosting", async () => this.plugin.addRecipeToCanvas(this.file.path, "hosting"));
-    addBtn("Add As Family Member...", async () => {
-      const familyMembers = normalizeFamilyMembersList(this.plugin.settings.familyMembers);
-      const result = await this.plugin.promptTextEntry({
-        title: "Add as family member",
-        label: familyMembers.length > 0 ? `Person's name (e.g. ${familyMembers.join(", ")})` : "Person's name",
-        submitText: "Add",
-      });
-      if (result.cancelled) return;
-      const person = String(result.value || "").trim();
-      if (!person) return;
-      await this.plugin.addRecipeToCanvas(this.file.path, { type: "family", person });
-    });
     addBtn("Generate Shopping List", async () => {
       const ok = this.app.commands.executeCommandById("weekly-meal-shopper:generate-weekly-shopping-list-from-canvas");
       if (!ok) new Notice("Generate shopping list command not found.");
@@ -5113,6 +5071,11 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.recipeViewOverlay = null;
     this.activeRecipeCardModal = null;
     this.parsedIngredientCache = new Map();
+    this.mealCoveragePanelEl = null;
+    this.mealCoverageListEl = null;
+    this.activeCoverageCanvasFile = null;
+    this.coverageDebounceTimer = null;
+    this.coverageWriteInProgress = false;
     this.registerMarkdownPostProcessor((element, context) => {
       this.attachShoppingListOverrideLinks(element, context);
     });
@@ -5354,34 +5317,26 @@ class WeeklyMealShopperPlugin extends Plugin {
       },
     });
 
-    this.addCommand({
-      id: "add-active-recipe-to-canvas-family",
-      name: "Add active recipe to weekly meal plan (family member)",
-      callback: async () => {
-        const file = this.app.workspace.getActiveFile();
-        if (!(file instanceof TFile) || file.extension !== "md") { new Notice("Open a recipe note first."); return; }
-        const familyMembers = normalizeFamilyMembersList(this.settings.familyMembers);
-        const result = await this.promptTextEntry({
-          title: "Add as family member",
-          label: familyMembers.length > 0 ? `Person's name (e.g. ${familyMembers.join(", ")})` : "Person's name",
-          submitText: "Add",
-        });
-        if (result.cancelled) return;
-        const person = String(result.value || "").trim();
-        if (!person) return;
-        await this.addRecipeToCanvas(file.path, { type: "family", person });
-      },
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => this.handleActiveLeafChangeForCoverage(leaf))
+    );
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => this.handleVaultModifyForCoverage(file))
+    );
+    this.app.workspace.onLayoutReady(() => {
+      this.handleActiveLeafChangeForCoverage(this.app.workspace.activeLeaf);
     });
-
   }
 
   onunload() {
     if (this.activeRecipeCardModal) this.activeRecipeCardModal.close();
     this.closeRecipeViewOverlay({ restoreLivePreview: false });
+    this.teardownMealCoverageOverlay();
+    if (this.coverageDebounceTimer) clearTimeout(this.coverageDebounceTimer);
   }
 
   // Adds a recipe file node to the weekly meal-plan canvas.
-  // section: "default" | "project" | "hosting" | { type: "family", person: string }
+  // section: "default" | "project" | "hosting"
   async addRecipeToCanvas(filePath, section = "default") {
     const canvasPath = normalizePath(this.settings.weeklyCanvasPath || DEFAULT_SETTINGS.weeklyCanvasPath);
     const target = this.app.vault.getAbstractFileByPath(canvasPath);
@@ -5408,38 +5363,15 @@ class WeeklyMealShopperPlugin extends Plugin {
       return false;
     }
 
-    const isFamily = !!(section && typeof section === "object" && section.type === "family" && section.person);
-    const sectionLabel = isFamily ? `family: ${section.person}` : String(section || "default");
-
     let x = 100;
     let y = 100;
 
-    let groups = canvas.nodes.filter((n) => n && n.type === "group");
+    const groups = canvas.nodes.filter((n) => n && n.type === "group");
     const labelPattern =
-      isFamily ? new RegExp(`family\\s*:\\s*${escapeRegExp(section.person)}`, "i") :
       section === "project" ? /project/i :
       section === "hosting" ? /hosting/i :
       null;
-    let group = labelPattern ? groups.find((g) => labelPattern.test(String(g.label || ""))) : null;
-
-    if (!group && isFamily) {
-      // Family groups aren't part of the bundled canvas template — create one
-      // on the fly, below any existing groups. Still a plain `group` node, so
-      // this doesn't change the .canvas JSON schema.
-      const maxGroupBottom = groups.reduce((m, g) => Math.max(m, (Number(g.y) || 0) + (Number(g.height) || 0)), 0);
-      group = {
-        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
-        type: "group",
-        x: -640,
-        y: maxGroupBottom + 80,
-        width: 900,
-        height: 600,
-        color: "6",
-        label: `Family: ${section.person}`,
-      };
-      canvas.nodes.push(group);
-      groups = [...groups, group];
-    }
+    const group = labelPattern ? groups.find((g) => labelPattern.test(String(g.label || ""))) : null;
 
     if (group) {
       const inGroup = canvas.nodes.filter((n) => {
@@ -5466,7 +5398,7 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     await this.app.vault.modify(target, `${JSON.stringify(canvas, null, 2)}\n`);
     const basename = normalizedFile.split("/").pop()?.replace(/\.md$/, "") || normalizedFile;
-    new Notice(`Added ${basename} to meal plan canvas (${sectionLabel}).`);
+    new Notice(`Added ${basename} to meal plan canvas (${section}).`);
     return true;
   }
 
@@ -5510,7 +5442,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.energyUnit = normalizeEnergyUnit(this.settings.energyUnit);
     this.settings.macrosEnabled = this.settings.macrosEnabled === true;
     this.settings.nutritionDatabasePath = String(this.settings.nutritionDatabasePath || "").trim();
-    this.settings.familyMembers = normalizeFamilyMembersList(this.settings.familyMembers);
+    this.settings.householdSize = positiveNumberOr(this.settings.householdSize, 1);
     delete this.settings.cupShorthand;
     delete this.settings.tbspShorthand;
     delete this.settings.tspShorthand;
@@ -5555,7 +5487,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       excludeIngredientsCollapsed: !!sectionState.excludeIngredientsCollapsed,
       ingredientOverridesCollapsed: !!sectionState.ingredientOverridesCollapsed,
       nutritionSectionCollapsed: !!sectionState.nutritionSectionCollapsed,
-      familySectionCollapsed: !!sectionState.familySectionCollapsed,
     };
     this.settings.transcriptionApiKey = String(this.settings.transcriptionApiKey || "").trim();
     if (typeof this.settings.useStoredTranscriptionApiKey !== "boolean") {
@@ -5592,7 +5523,7 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.energyUnit = normalizeEnergyUnit(this.settings.energyUnit);
     this.settings.macrosEnabled = this.settings.macrosEnabled === true;
     this.settings.nutritionDatabasePath = String(this.settings.nutritionDatabasePath || "").trim();
-    this.settings.familyMembers = normalizeFamilyMembersList(this.settings.familyMembers);
+    this.settings.householdSize = positiveNumberOr(this.settings.householdSize, 1);
     setActiveMeasurementProfile(this.settings);
     setActiveIngredientStorageSeparator(this.settings.ingredientStorageSeparator);
     setActiveRecipeViewIngredientDisplayTemplate(this.settings.recipeViewIngredientDisplayTemplate);
@@ -6721,9 +6652,9 @@ class WeeklyMealShopperPlugin extends Plugin {
       "RecipeRating: 3",
       "MealPrep: false",
       "WeekDay: false",
-      "PortionsPerMeal: 1",
       "FrozenPortionsAvailable: 0",
       "UseFrozenFirst: true",
+      "TrackMacros: false",
       "type: Recipe",
       "FoodType: Meal Item",
       "Collection: []",
@@ -7607,7 +7538,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       frontmatter.RecipeRating = frontmatter.RecipeRating ?? 3;
       frontmatter.MealPrep = frontmatter.MealPrep ?? false;
       frontmatter.WeekDay = frontmatter.WeekDay ?? false;
-      frontmatter.PortionsPerMeal = frontmatter.PortionsPerMeal ?? 1;
       frontmatter.FrozenPortionsAvailable = frontmatter.FrozenPortionsAvailable ?? 0;
       frontmatter.UseFrozenFirst = frontmatter.UseFrozenFirst ?? true;
       frontmatter.type = "Recipe";
@@ -7785,28 +7715,184 @@ class WeeklyMealShopperPlugin extends Plugin {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter || {};
     const portionsPerCook = Math.max(1, parseNumberLike(fm.Portions ?? fm.Servings, 1));
-    const portionsPerMeal = Math.max(1, parseNumberLike(fm.PortionsPerMeal, 1));
+    const portionsPerMeal = positiveNumberOr(this.settings?.householdSize, 1);
     const frozenAvailable = Math.max(0, parseNumberLike(fm.FrozenPortionsAvailable, 0));
     const useFrozenFirst = parseBooleanLike(fm.UseFrozenFirst, true);
 
-    const plannedPortions = plannedInstances * portionsPerMeal;
-    const frozenUsed = useFrozenFirst ? Math.min(frozenAvailable, plannedPortions) : 0;
-    const portionsNeedingCook = Math.max(0, plannedPortions - frozenUsed);
-    const cooksNeeded = portionsNeedingCook > 0 ? Math.ceil(portionsNeedingCook / portionsPerCook) : 0;
-    const cookedPortions = cooksNeeded * portionsPerCook;
-    const projectedFrozen = Math.max(0, frozenAvailable - frozenUsed + Math.max(0, cookedPortions - portionsNeedingCook));
+    return computePlanningProfile({ portionsPerCook, portionsPerMeal, frozenAvailable, useFrozenFirst, plannedInstances });
+  }
 
-    return {
-      portionsPerCook,
-      portionsPerMeal,
-      frozenAvailable,
-      useFrozenFirst,
-      plannedPortions,
-      frozenUsed,
-      portionsNeedingCook,
-      cooksNeeded,
-      projectedFrozen,
-    };
+  // Coverage for the "Meal Coverage" canvas overlay: for every recipe card in
+  // the plain weekly-plan section of the given canvas (not Projects/Hosting,
+  // which already have their own explicit serving-target prompts), how many
+  // times it's planned this week vs. how many cook batches that requires.
+  async computeMealCoverageForCanvas(canvasFile) {
+    let canvasText = "";
+    try {
+      canvasText = await this.app.vault.read(canvasFile);
+    } catch {
+      return [];
+    }
+
+    const entries = parseCanvasRecipeEntries(canvasText);
+    const counts = new Map();
+    for (const entry of entries) {
+      if (entry.section !== "default") continue;
+      let file = this.app.vault.getAbstractFileByPath(normalizePath(entry.rawPath));
+      if (!(file instanceof TFile)) {
+        const linkDest = this.app.metadataCache.getFirstLinkpathDest(entry.rawPath, canvasFile.path);
+        if (linkDest) file = linkDest;
+      }
+      if (!(file instanceof TFile) || file.extension !== "md") continue;
+      if (!this.isRecipeFile(file)) continue;
+
+      const existing = counts.get(file.path) || { file, defaultCount: 0 };
+      existing.defaultCount += 1;
+      counts.set(file.path, existing);
+    }
+
+    const rows = [];
+    for (const { file, defaultCount } of counts.values()) {
+      const recipePortions = this.getRecipePortions(file);
+      const profile = this.getRecipePlanningProfile(file, defaultCount);
+      rows.push({
+        file,
+        plannedInstances: defaultCount,
+        recipePortions,
+        householdSize: positiveNumberOr(this.settings?.householdSize, 1),
+        cooksNeeded: profile.cooksNeeded,
+        status: classifyMealCoverageStatus(profile),
+      });
+    }
+
+    return rows;
+  }
+
+  // Writes green/red onto each plain-weekly-section recipe card's `color`
+  // field so coverage status is visible directly on the card, not just in the
+  // overlay list. Only touches nodes whose color actually needs to change, so
+  // once in sync this is a no-op — that's what keeps the vault "modify"
+  // listener from looping against its own writes.
+  async syncCanvasCardColorsToCoverage(canvasFile, rows) {
+    let canvasText = "";
+    try {
+      canvasText = await this.app.vault.read(canvasFile);
+    } catch {
+      return;
+    }
+    let canvas;
+    try {
+      canvas = JSON.parse(canvasText);
+    } catch {
+      return;
+    }
+    if (!Array.isArray(canvas.nodes)) return;
+
+    const COLOR_COVERED = "4"; // Obsidian canvas preset green
+    const COLOR_SHORT = "1"; // Obsidian canvas preset red
+    const statusByPath = new Map(rows.map((r) => [r.file.path, r.status]));
+    const groups = canvas.nodes.filter((n) => n && n.type === "group");
+
+    let changed = false;
+    for (const node of canvas.nodes) {
+      if (!node || node.type !== "file" || typeof node.file !== "string") continue;
+      if (sectionForNode(node, groups) !== "default") continue;
+      const status = statusByPath.get(normalizePath(node.file));
+      if (!status) continue;
+      const desiredColor = status === "short" ? COLOR_SHORT : COLOR_COVERED;
+      if (node.color !== desiredColor) {
+        node.color = desiredColor;
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+    this.coverageWriteInProgress = true;
+    try {
+      await this.app.vault.modify(canvasFile, `${JSON.stringify(canvas, null, 2)}\n`);
+    } finally {
+      this.coverageWriteInProgress = false;
+    }
+  }
+
+  // Injects the floating "Meal Coverage" overlay directly into the canvas
+  // view's own DOM (the same layer Obsidian's built-in zoom/undo toolbar
+  // uses) — not an Obsidian sidebar pane. Torn down whenever the active leaf
+  // stops being this canvas.
+  handleActiveLeafChangeForCoverage(leaf) {
+    this.teardownMealCoverageOverlay();
+    const file = leaf?.view?.file;
+    if (!(file instanceof TFile) || file.extension !== "canvas") return;
+    this.activeCoverageCanvasFile = file;
+    this.setupMealCoverageOverlay(leaf);
+    this.refreshMealCoverageOverlay();
+  }
+
+  setupMealCoverageOverlay(leaf) {
+    const containerEl = leaf?.view?.containerEl;
+    if (!containerEl) return;
+    const panel = containerEl.createDiv({ cls: "weekly-meal-shopper-coverage-panel" });
+    panel.createDiv({ cls: "weekly-meal-shopper-coverage-title", text: "Meal Coverage" });
+    const list = panel.createDiv({ cls: "weekly-meal-shopper-coverage-list" });
+    this.mealCoveragePanelEl = panel;
+    this.mealCoverageListEl = list;
+  }
+
+  teardownMealCoverageOverlay() {
+    this.mealCoveragePanelEl?.remove();
+    this.mealCoveragePanelEl = null;
+    this.mealCoverageListEl = null;
+    this.activeCoverageCanvasFile = null;
+  }
+
+  // Debounced so rapid canvas edits (dragging cards around) don't trigger a
+  // recompute + rewrite on every intermediate frame.
+  handleVaultModifyForCoverage(file) {
+    if (this.coverageWriteInProgress) return;
+    if (!(file instanceof TFile) || file.extension !== "canvas") return;
+    if (!this.activeCoverageCanvasFile || file.path !== this.activeCoverageCanvasFile.path) return;
+    if (this.coverageDebounceTimer) clearTimeout(this.coverageDebounceTimer);
+    this.coverageDebounceTimer = setTimeout(() => this.refreshMealCoverageOverlay(), 400);
+  }
+
+  async refreshMealCoverageOverlay() {
+    if (!this.activeCoverageCanvasFile || !this.mealCoverageListEl) return;
+    const canvasFile = this.activeCoverageCanvasFile;
+    const rows = await this.computeMealCoverageForCanvas(canvasFile);
+    // The active canvas may have changed while the above awaits were in flight.
+    if (this.activeCoverageCanvasFile !== canvasFile || !this.mealCoverageListEl) return;
+    this.renderMealCoverageList(rows);
+    await this.syncCanvasCardColorsToCoverage(canvasFile, rows);
+  }
+
+  renderMealCoverageList(rows) {
+    const listEl = this.mealCoverageListEl;
+    if (!listEl) return;
+    listEl.empty();
+
+    if (rows.length === 0) {
+      listEl.createDiv({ cls: "weekly-meal-shopper-coverage-empty", text: "No recipes planned this week yet." });
+      return;
+    }
+
+    const householdSize = positiveNumberOr(this.settings?.householdSize, 1);
+    for (const row of rows) {
+      const rowEl = listEl.createDiv({ cls: `weekly-meal-shopper-coverage-row is-${row.status}` });
+      rowEl.createDiv({ cls: "weekly-meal-shopper-coverage-dot" });
+      const textEl = rowEl.createDiv({ cls: "weekly-meal-shopper-coverage-text" });
+      textEl.createDiv({ cls: "weekly-meal-shopper-coverage-name", text: row.file.basename });
+      const coverage = row.recipePortions / householdSize;
+      textEl.createDiv({
+        cls: "weekly-meal-shopper-coverage-detail",
+        text: `${formatMetricAmount(row.recipePortions)} portions ÷ ${formatMetricAmount(householdSize)} household = covers ${formatMetricAmount(coverage)} meal(s)`,
+      });
+      textEl.createDiv({
+        cls: "weekly-meal-shopper-coverage-detail",
+        text: row.status === "short"
+          ? `planned ${row.plannedInstances}× this week → ${row.cooksNeeded} batches needed`
+          : `planned ${row.plannedInstances}× this week → covered by 1 batch`,
+      });
+    }
   }
 
   async showFrozenPortionsAvailable() {
@@ -7831,7 +7917,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       "    order:",
       "      - file.name",
       "      - FrozenPortionsAvailable",
-      "      - PortionsPerMeal",
       "",
     ].join("\n");
 
@@ -8214,22 +8299,15 @@ class WeeklyMealShopperPlugin extends Plugin {
           defaultCount: 0,
           projectCount: 0,
           hostingCount: 0,
-          // 1 card placed in a person's "Family: <name>" group = 1 serving for
-          // that person, mirroring how hostingCount/projectCount are also
-          // just card counts (no separate per-card serving-count prompt).
-          familyServings: new Map(),
           // Card count contributed by each source canvas, used to split the
           // ingredient list per canvas when splitShoppingListByCanvas is on.
           cardsByCanvas: new Map(),
         };
         recipes.set(file.path, existing);
       }
-      if (entry.section?.type === "project") existing.projectCount += 1;
-      else if (entry.section?.type === "hosting") existing.hostingCount += 1;
-      else if (entry.section?.type === "family" && entry.section.person) {
-        const person = entry.section.person;
-        existing.familyServings.set(person, (existing.familyServings.get(person) || 0) + 1);
-      } else existing.defaultCount += 1;
+      if (entry.section === "project") existing.projectCount += 1;
+      else if (entry.section === "hosting") existing.hostingCount += 1;
+      else existing.defaultCount += 1;
       const canvasPath = entry.sourceCanvas?.path || "";
       existing.cardsByCanvas.set(canvasPath, (existing.cardsByCanvas.get(canvasPath) || 0) + 1);
     }
@@ -8322,9 +8400,7 @@ class WeeklyMealShopperPlugin extends Plugin {
       targetTotals.set(key, existing);
     };
 
-    const familyMealPlanRows = [];
-
-    for (const { file, defaultCount, projectCount, hostingCount, familyServings, cardsByCanvas } of recipes.values()) {
+    for (const { file, defaultCount, projectCount, hostingCount, cardsByCanvas } of recipes.values()) {
       const profile = this.getRecipePlanningProfile(file, defaultCount);
       let ingredients = [];
       try {
@@ -8337,29 +8413,9 @@ class WeeklyMealShopperPlugin extends Plugin {
 
       const projectPortionsTotal = projectCount > 0 ? (projectServingsTargets.get(file.path) || 0) : 0;
       const hostingPortionsTotal = hostingCount > 0 ? hostingPeopleNeeded * hostingCount : 0;
-      const familyPortionsTotal = familyServings instanceof Map
-        ? [...familyServings.values()].reduce((sum, n) => sum + n, 0)
-        : 0;
       const projectBatches = projectPortionsTotal > 0 ? Math.ceil(projectPortionsTotal / recipePortions) : 0;
       const hostingBatches = hostingPortionsTotal > 0 ? Math.ceil(hostingPortionsTotal / recipePortions) : 0;
-      const familyBatches = familyPortionsTotal > 0 ? Math.ceil(familyPortionsTotal / recipePortions) : 0;
-      const totalBatches = profile.cooksNeeded + projectBatches + hostingBatches + familyBatches;
-
-      if (familyServings instanceof Map && familyServings.size > 0) {
-        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
-        const macrosAvailable = this.settings.macrosEnabled === true
-          && fm.TrackMacros === true
-          && Number.isFinite(Number(fm.MacroKcalPerServing));
-        const macros = macrosAvailable ? {
-          kcal: Number(fm.MacroKcalPerServing),
-          protein: Number(fm.MacroProteinGPerServing),
-          carbs: Number(fm.MacroCarbsGPerServing),
-          fat: Number(fm.MacroFatGPerServing),
-        } : null;
-        for (const [person, servings] of familyServings) {
-          familyMealPlanRows.push({ person, file, servings, macros });
-        }
-      }
+      const totalBatches = profile.cooksNeeded + projectBatches + hostingBatches;
 
       recipePlanLines.push(
         `- [[${file.path}|${file.basename}]] weekly x${defaultCount} (planned ${profile.plannedPortions} portions, frozen used ${profile.frozenUsed}, cook batches ${profile.cooksNeeded})`
@@ -8472,9 +8528,6 @@ class WeeklyMealShopperPlugin extends Plugin {
       "## Hosting Scaling",
       hostingScaleLines.join("\n") || "- None",
       "",
-      "## Family Meal Plan",
-      buildFamilyMealPlanLines(familyMealPlanRows, this.settings.energyUnit).join("\n"),
-      "",
       "## Shopping Checklist",
       shoppingChecklistBlock,
       "",
@@ -8580,6 +8633,19 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       title: "Meal-prep setup",
       description: "Shopping-list output behavior and quick override controls.",
     });
+
+    new Setting(mealPrepBody)
+      .setName("Household size")
+      .setDesc("How many portions a single planned meal instance needs to feed. Drives weekly batch-scaling and the canvas coverage overlay — e.g. a family of 4 needs 4 portions per planned dinner.")
+      .addText((text) =>
+        text
+          .setPlaceholder("1")
+          .setValue(String(positiveNumberOr(this.plugin.settings.householdSize, 1)))
+          .onChange(async (value) => {
+            this.plugin.settings.householdSize = positiveNumberOr(value, this.plugin.settings.householdSize);
+            await this.plugin.saveSettings();
+          })
+      );
 
     new Setting(mealPrepBody)
       .setName("Show recipe usage in shopping list")
@@ -8941,12 +9007,11 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     this.renderLegumeSettingsSection(containerEl);
 
     this.renderCategoryHeading(containerEl, {
-      title: "Nutrition & Family",
-      description: "Macro tracking (protein/carbs/fat/kcal) and multi-person meal planning.",
+      title: "Nutrition",
+      description: "Macro tracking (protein/carbs/fat/kcal).",
     });
 
     this.renderNutritionSettingsSection(containerEl);
-    this.renderFamilySettingsSection(containerEl);
 
     this.renderCategoryHeading(containerEl, {
       title: "First-Time Setup",
@@ -9168,56 +9233,6 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           new Notice(`Nutrition database reloaded (${count} ingredient(s)).`);
         })
       );
-  }
-
-  renderFamilySettingsSection(containerEl) {
-    const { body, searchInput } = this.buildFoldableSection(containerEl, {
-      stateKey: "familySectionCollapsed",
-      title: "Family",
-      description: "Household member names, used for autocomplete/labeling convenience only — canvas groups like 'Family: Anyone' work even if 'Anyone' isn't listed here.",
-      searchPlaceholder: "Add a family member name and press Enter",
-    });
-
-    const listEl = body.createDiv({ cls: "weekly-meal-shopper-entry-list" });
-
-    const renderList = () => {
-      listEl.empty();
-      const members = normalizeFamilyMembersList(this.plugin.settings.familyMembers);
-      if (members.length === 0) {
-        listEl.createEl("div", { text: "No family members added yet.", cls: "weekly-meal-shopper-empty" });
-        return;
-      }
-      for (const name of members) {
-        const row = listEl.createDiv({ cls: "weekly-meal-shopper-entry-row" });
-        row.createEl("span", { text: name, cls: "weekly-meal-shopper-entry-text" });
-        const removeBtn = row.createEl("button", { text: "Remove", cls: "weekly-meal-shopper-remove-btn" });
-        removeBtn.addEventListener("click", async () => {
-          const key = normalizeSearchText(name);
-          this.plugin.settings.familyMembers = normalizeFamilyMembersList(this.plugin.settings.familyMembers)
-            .filter((existing) => normalizeSearchText(existing) !== key);
-          await this.plugin.saveSettings();
-          renderList();
-        });
-      }
-    };
-
-    if (searchInput) {
-      searchInput.addEventListener("keydown", async (event) => {
-        if (event.key !== "Enter") return;
-        const name = String(searchInput.value || "").trim();
-        if (!name) return;
-        event.preventDefault();
-        this.plugin.settings.familyMembers = normalizeFamilyMembersList([
-          ...this.plugin.settings.familyMembers,
-          name,
-        ]);
-        await this.plugin.saveSettings();
-        searchInput.value = "";
-        renderList();
-      });
-    }
-
-    renderList();
   }
 
   renderLegumeSettingsSection(containerEl) {

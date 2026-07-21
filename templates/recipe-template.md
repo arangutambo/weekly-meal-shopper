@@ -10,7 +10,6 @@ Cost:
 RecipeRating: 3
 MealPrep: false
 WeekDay: false
-PortionsPerMeal: 1
 FrozenPortionsAvailable: 0
 UseFrozenFirst: true
 TrackMacros: false
