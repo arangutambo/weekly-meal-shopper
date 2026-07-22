@@ -63,21 +63,23 @@ const DEFAULT_SETTINGS = {
   // Macronutrient tracking (opt-in globally, then per-recipe via TrackMacros).
   macrosEnabled: false,
   energyUnit: "kcal", // "kcal" | "kJ" — independent of measurementPreference/measurementPreset
-  // Which local dataset feeds estimateIngredientMacrosPer100g by default.
-  nutritionDatabaseSource: "builtin", // "builtin" | "downloaded" | "custom"
-  nutritionDatabasePath: "", // vault-relative path, used when nutritionDatabaseSource = "custom"
-  // Independent of nutritionDatabaseSource: when on, an ingredient not found
-  // locally is looked up from an online provider and the result cached to
-  // nutrition-live-cache.json so it never needs a second network call.
+  // When on, an ingredient not found locally is looked up from an online
+  // provider and the result cached to nutrition-live-cache.json so it never
+  // needs a second network call.
   nutritionLiveLookupEnabled: false,
   nutritionLiveLookupProvider: "usda", // "usda" | "openfoodfacts"
   usdaApiKey: "", // free key from fdc.nal.usda.gov/api-key-signup, only used for live lookup
-  // How many portions a single planned instance of a recipe needs to feed —
-  // replaces the old per-recipe PortionsPerMeal field. Drives both weekly
-  // batch-scaling and the Meal Coverage canvas overlay.
+  // How many portions a single planned instance of a recipe needs to feed,
+  // by default. Drives both weekly batch-scaling and the Meal Coverage
+  // canvas overlay. Overridable per-recipe via frontmatter PortionsPerMeal.
   householdSize: 1,
   // Live coverage overlay + card coloring on the meal-plan canvas.
   mealCoverageEnabled: true,
+  // Live per-day macro-totals overlay on the meal-plan canvas — a separate
+  // panel from Meal Coverage. Off by default (depends on macrosEnabled +
+  // per-recipe TrackMacros already being calculated, so it's low-value until
+  // that's set up).
+  macroDetailsEnabled: false,
   // Which weekday sits at the left edge of a newly created meal-plan canvas,
   // and the chronological reference point for coverage sorting / "cook again
   // before <day>" callouts.
@@ -543,6 +545,8 @@ const DEFAULT_NUTRITION_CONFIG = {
     "orange": { kcal: 47, protein: 0.9, carbs: 11.8, fat: 0.1, gramsPerUnit: 131 },
     "lemon": { kcal: 29, protein: 1.1, carbs: 9.3, fat: 0.3, gramsPerUnit: 58 },
     "lime": { kcal: 30, protein: 0.7, carbs: 10.5, fat: 0.2, gramsPerUnit: 67 },
+    "mandarin": { kcal: 53, protein: 0.8, carbs: 13.3, fat: 0.3, gramsPerUnit: 84 },
+    "clementine": { kcal: 47, protein: 0.9, carbs: 12, fat: 0.2, gramsPerUnit: 74 },
     "strawberries": { kcal: 32, protein: 0.7, carbs: 7.7, fat: 0.3 },
     "blueberries": { kcal: 57, protein: 0.7, carbs: 14.5, fat: 0.3 },
     "grapes": { kcal: 69, protein: 0.7, carbs: 18.1, fat: 0.2 },
@@ -789,11 +793,6 @@ function convertKcalToDisplayEnergy(kcal, unit = ACTIVE_ENERGY_UNIT) {
   return normalizeEnergyUnit(unit) === "kJ" ? num * KCAL_TO_KJ : num;
 }
 
-function normalizeNutritionDatabaseSource(value) {
-  const v = normalizeSearchText(value);
-  return v === "downloaded" || v === "custom" ? v : "builtin";
-}
-
 function normalizeNutritionLiveLookupProvider(value) {
   const v = normalizeSearchText(value);
   return v === "openfoodfacts" ? "openfoodfacts" : "usda";
@@ -896,6 +895,22 @@ function estimateIngredientMacrosPer100g(name) {
   if (!text) return null;
   for (const [pattern, macros] of NUTRITION_ENTRIES) {
     if (text.includes(pattern)) return macros;
+  }
+
+  // Word-overlap fallback: official USDA bulk-dataset descriptions (e.g.
+  // "chicken broiler or fryers breast skinless boneless meat only cooked
+  // braised") are longer and differently-ordered than what a user actually
+  // types ("chicken breast"), so the substring check above — which assumes
+  // the dataset key is a short phrase CONTAINED IN the ingredient text —
+  // never matches them. Fall back to: every word the user typed appears
+  // somewhere among the pattern's words, in any order. NUTRITION_ENTRIES is
+  // sorted longest-pattern-first, so among equally-valid word-overlap
+  // matches the most specific (longest) one wins.
+  const textWords = text.split(" ").filter(Boolean);
+  if (textWords.length === 0) return null;
+  for (const [pattern, macros] of NUTRITION_ENTRIES) {
+    const patternWords = pattern.split(" ");
+    if (textWords.every((word) => patternWords.includes(word))) return macros;
   }
   return null;
 }
@@ -5474,6 +5489,9 @@ class WeeklyMealShopperPlugin extends Plugin {
     await this.ensureUnitAliasConfigFile();
     await this.loadUnitDensityConfig();
     await this.loadUnitAliasConfig();
+    // Fire-and-forget: this does a network download when macros is already
+    // enabled from a previous session — must not block the rest of onload.
+    this.ensureDownloadedNutritionDatasetIsActive();
 
     this.addSettingTab(new WeeklyMealShopperSettingTab(this.app, this));
     this.recipeViewOverlay = null;
@@ -5484,6 +5502,12 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.activeCoverageCanvasFile = null;
     this.coverageDebounceTimer = null;
     this.coverageWriteInProgress = false;
+    this.macroDetailsPanelEl = null;
+    this.macroDetailsListEl = null;
+    this.activeMacroDetailsCanvasFile = null;
+    this.macroDetailsDebounceTimer = null;
+    this.macroDetailsPanelCollapsed = false;
+    this.macroDetailsCollapsedDays = new Set();
     this.registerMarkdownPostProcessor((element, context) => {
       this.attachShoppingListOverrideLinks(element, context);
     });
@@ -5765,6 +5789,8 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.closeRecipeViewOverlay({ restoreLivePreview: false });
     this.teardownMealCoverageOverlay();
     if (this.coverageDebounceTimer) clearTimeout(this.coverageDebounceTimer);
+    this.teardownMacroDetailsOverlay();
+    if (this.macroDetailsDebounceTimer) clearTimeout(this.macroDetailsDebounceTimer);
   }
 
   // Adds a recipe file node to the weekly meal-plan canvas.
@@ -5873,13 +5899,12 @@ class WeeklyMealShopperPlugin extends Plugin {
     this.settings.convertLiquidVolumeMeasuresToWeight = this.settings.convertLiquidVolumeMeasuresToWeight !== false;
     this.settings.energyUnit = normalizeEnergyUnit(this.settings.energyUnit);
     this.settings.macrosEnabled = this.settings.macrosEnabled === true;
-    this.settings.nutritionDatabaseSource = normalizeNutritionDatabaseSource(this.settings.nutritionDatabaseSource);
-    this.settings.nutritionDatabasePath = String(this.settings.nutritionDatabasePath || "").trim();
     this.settings.nutritionLiveLookupEnabled = this.settings.nutritionLiveLookupEnabled === true;
     this.settings.nutritionLiveLookupProvider = normalizeNutritionLiveLookupProvider(this.settings.nutritionLiveLookupProvider);
     this.settings.usdaApiKey = String(this.settings.usdaApiKey || "").trim();
     this.settings.householdSize = positiveNumberOr(this.settings.householdSize, 1);
     this.settings.mealCoverageEnabled = this.settings.mealCoverageEnabled !== false;
+    this.settings.macroDetailsEnabled = this.settings.macroDetailsEnabled === true;
     this.settings.weekStartDay = normalizeWeekStartDay(this.settings.weekStartDay);
     this.settings.coverageAcknowledgedShort = this.settings.coverageAcknowledgedShort && typeof this.settings.coverageAcknowledgedShort === "object"
       ? this.settings.coverageAcknowledgedShort
@@ -5963,13 +5988,12 @@ class WeeklyMealShopperPlugin extends Plugin {
     );
     this.settings.energyUnit = normalizeEnergyUnit(this.settings.energyUnit);
     this.settings.macrosEnabled = this.settings.macrosEnabled === true;
-    this.settings.nutritionDatabaseSource = normalizeNutritionDatabaseSource(this.settings.nutritionDatabaseSource);
-    this.settings.nutritionDatabasePath = String(this.settings.nutritionDatabasePath || "").trim();
     this.settings.nutritionLiveLookupEnabled = this.settings.nutritionLiveLookupEnabled === true;
     this.settings.nutritionLiveLookupProvider = normalizeNutritionLiveLookupProvider(this.settings.nutritionLiveLookupProvider);
     this.settings.usdaApiKey = String(this.settings.usdaApiKey || "").trim();
     this.settings.householdSize = positiveNumberOr(this.settings.householdSize, 1);
     this.settings.mealCoverageEnabled = this.settings.mealCoverageEnabled !== false;
+    this.settings.macroDetailsEnabled = this.settings.macroDetailsEnabled === true;
     this.settings.weekStartDay = normalizeWeekStartDay(this.settings.weekStartDay);
     setActiveMeasurementProfile(this.settings);
     setActiveIngredientStorageSeparator(this.settings.ingredientStorageSeparator);
@@ -8163,12 +8187,14 @@ class WeeklyMealShopperPlugin extends Plugin {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter || {};
     const portionsPerCook = Math.max(1, parseNumberLike(fm.Portions ?? fm.Servings, 1));
-    // Optional per-recipe frontmatter override for recipes that don't need a
-    // full household-size portion per planned instance (e.g. a side of fruit
-    // where each person only really eats half a normal serving) — defaults
-    // to 1 (no change) when absent, so most recipes are unaffected.
-    const servingMultiplier = positiveNumberOr(fm.ServingMultiplier, 1);
-    const portionsPerMeal = positiveNumberOr(this.settings?.householdSize, 1) * servingMultiplier;
+    // Optional per-recipe frontmatter override: how many portions ONE
+    // planned instance of this specific recipe needs. Defaults to the global
+    // household size when absent, so most recipes need no override at all —
+    // only set this on a recipe where a planned instance genuinely needs
+    // more or less than a full household-size portion (e.g. a side of fruit
+    // where each person only really eats half a normal serving: household 4
+    // -> set PortionsPerMeal: 2 directly, no separate multiplier to reason about).
+    const portionsPerMeal = positiveNumberOr(fm.PortionsPerMeal, positiveNumberOr(this.settings?.householdSize, 1));
     const frozenAvailable = Math.max(0, parseNumberLike(fm.FrozenPortionsAvailable, 0));
     const useFrozenFirst = parseBooleanLike(fm.UseFrozenFirst, true);
 
@@ -8280,6 +8306,79 @@ class WeeklyMealShopperPlugin extends Plugin {
     return rows;
   }
 
+  // Per-day macro breakdown for the canvas's Macro Details overlay — a
+  // SEPARATE panel from Meal Coverage (different question: "how much am I
+  // eating each day" vs "do I have enough batches cooked"). One entry per
+  // weekday (ordered per weekStartDay, always all 7 so empty days still show
+  // up), each with day totals plus a per-meal breakdown. Only counts
+  // `type: "file"` cards sitting inside a recognizable day column in the
+  // "default" section (same geometric pass as the coverage overlay's
+  // "cook again" detection) — text-node-embedded recipe links and
+  // Project/Hosting cards are day-agnostic/out of scope here. A card whose
+  // recipe hasn't had macros calculated yet (TrackMacros off or never run)
+  // is counted in `uncalculatedCount` rather than silently treated as 0, so
+  // the panel can say "N meal(s) not yet calculated" instead of understating
+  // the day's total.
+  async computeMacroDetailsForCanvas(canvasFile) {
+    let canvasText = "";
+    try {
+      canvasText = await this.app.vault.read(canvasFile);
+    } catch {
+      return [];
+    }
+
+    let canvasJson = null;
+    try {
+      canvasJson = JSON.parse(canvasText);
+    } catch {
+      canvasJson = null;
+    }
+    if (!canvasJson || !Array.isArray(canvasJson.nodes)) return [];
+
+    const groups = canvasJson.nodes.filter((n) => n && n.type === "group");
+    const orderedDays = getOrderedWeekdays(this.settings?.weekStartDay);
+    const byDay = new Map(
+      orderedDays.map((day) => [
+        day,
+        { day, displayName: WEEKDAY_DISPLAY_NAMES[day], totalKcal: 0, totalProtein: 0, totalCarbs: 0, totalFat: 0, meals: [], uncalculatedCount: 0 },
+      ])
+    );
+
+    for (const node of canvasJson.nodes) {
+      if (!node || node.type !== "file" || typeof node.file !== "string") continue;
+      if (sectionForNode(node, groups) !== "default") continue;
+
+      const day = findContainingWeekdayLabel(node, groups);
+      if (!day || !byDay.has(day)) continue;
+
+      let file = this.app.vault.getAbstractFileByPath(normalizePath(node.file));
+      if (!(file instanceof TFile)) {
+        const linkDest = this.app.metadataCache.getFirstLinkpathDest(node.file, canvasFile.path);
+        if (linkDest) file = linkDest;
+      }
+      if (!(file instanceof TFile) || file.extension !== "md") continue;
+
+      const bucket = byDay.get(day);
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+      const kcal = Number(fm.MacroKcalPerServing);
+      if (fm.TrackMacros !== true || !Number.isFinite(kcal)) {
+        bucket.uncalculatedCount += 1;
+        continue;
+      }
+
+      const protein = Number(fm.MacroProteinGPerServing) || 0;
+      const carbs = Number(fm.MacroCarbsGPerServing) || 0;
+      const fat = Number(fm.MacroFatGPerServing) || 0;
+      bucket.totalKcal += kcal;
+      bucket.totalProtein += protein;
+      bucket.totalCarbs += carbs;
+      bucket.totalFat += fat;
+      bucket.meals.push({ name: file.basename, mealType: findContainingMealTypeLabel(node, groups), kcal, protein, carbs, fat });
+    }
+
+    return orderedDays.map((day) => byDay.get(day));
+  }
+
   // Adds/removes recipePath from the acknowledged ("red -> yellow") set for
   // this canvas and persists it.
   async toggleCoverageAcknowledgment(canvasFile, recipePath) {
@@ -8355,12 +8454,24 @@ class WeeklyMealShopperPlugin extends Plugin {
   // stops being this canvas.
   handleActiveLeafChangeForCoverage(leaf) {
     this.teardownMealCoverageOverlay();
-    if (this.settings?.mealCoverageEnabled === false) return;
-    const file = leaf?.view?.file;
-    if (!(file instanceof TFile) || file.extension !== "canvas") return;
-    this.activeCoverageCanvasFile = file;
-    this.setupMealCoverageOverlay(leaf);
-    this.refreshMealCoverageOverlay();
+    if (this.settings?.mealCoverageEnabled !== false) {
+      const file = leaf?.view?.file;
+      if (file instanceof TFile && file.extension === "canvas") {
+        this.activeCoverageCanvasFile = file;
+        this.setupMealCoverageOverlay(leaf);
+        this.refreshMealCoverageOverlay();
+      }
+    }
+
+    this.teardownMacroDetailsOverlay();
+    if (this.settings?.macroDetailsEnabled === true) {
+      const file = leaf?.view?.file;
+      if (file instanceof TFile && file.extension === "canvas") {
+        this.activeMacroDetailsCanvasFile = file;
+        this.setupMacroDetailsOverlay(leaf);
+        this.refreshMacroDetailsOverlay();
+      }
+    }
   }
 
   setupMealCoverageOverlay(leaf) {
@@ -8383,11 +8494,127 @@ class WeeklyMealShopperPlugin extends Plugin {
   // Debounced so rapid canvas edits (dragging cards around) don't trigger a
   // recompute + rewrite on every intermediate frame.
   handleVaultModifyForCoverage(file) {
-    if (this.coverageWriteInProgress) return;
     if (!(file instanceof TFile) || file.extension !== "canvas") return;
-    if (!this.activeCoverageCanvasFile || file.path !== this.activeCoverageCanvasFile.path) return;
-    if (this.coverageDebounceTimer) clearTimeout(this.coverageDebounceTimer);
-    this.coverageDebounceTimer = setTimeout(() => this.refreshMealCoverageOverlay(), 400);
+
+    if (!this.coverageWriteInProgress && this.activeCoverageCanvasFile && file.path === this.activeCoverageCanvasFile.path) {
+      if (this.coverageDebounceTimer) clearTimeout(this.coverageDebounceTimer);
+      this.coverageDebounceTimer = setTimeout(() => this.refreshMealCoverageOverlay(), 400);
+    }
+
+    if (this.activeMacroDetailsCanvasFile && file.path === this.activeMacroDetailsCanvasFile.path) {
+      if (this.macroDetailsDebounceTimer) clearTimeout(this.macroDetailsDebounceTimer);
+      this.macroDetailsDebounceTimer = setTimeout(() => this.refreshMacroDetailsOverlay(), 400);
+    }
+  }
+
+  // Macro Details is a floating panel on the canvas view, positioned
+  // opposite Meal Coverage (top-right vs top-left) so the two read as
+  // clearly separate blocks rather than one combined panel. The whole panel
+  // collapses/expands (macroDetailsPanelCollapsed), and each day within it
+  // collapses independently (macroDetailsCollapsedDays) — both are in-memory
+  // UI state only, reset on reopening the canvas, same as recipeViewOverlay.
+  setupMacroDetailsOverlay(leaf) {
+    const containerEl = leaf?.view?.containerEl;
+    if (!containerEl) return;
+    const panel = containerEl.createDiv({ cls: "weekly-meal-shopper-macro-details-panel" });
+    const header = panel.createDiv({ cls: "weekly-meal-shopper-macro-details-header" });
+    header.createDiv({ cls: "weekly-meal-shopper-macro-details-title", text: "Macro Details" });
+    const indicator = header.createDiv({ cls: "weekly-meal-shopper-collapse-indicator", text: "▸" });
+    header.setAttribute("role", "button");
+    header.setAttribute("tabindex", "0");
+    const toggle = () => {
+      this.macroDetailsPanelCollapsed = !this.macroDetailsPanelCollapsed;
+      this.renderMacroDetailsPanel(this.lastMacroDetailsDays || []);
+    };
+    header.addEventListener("click", toggle);
+    header.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); }
+    });
+    const list = panel.createDiv({ cls: "weekly-meal-shopper-macro-details-list" });
+    this.macroDetailsPanelEl = panel;
+    this.macroDetailsListEl = list;
+    this.macroDetailsCollapseIndicatorEl = indicator;
+  }
+
+  teardownMacroDetailsOverlay() {
+    this.macroDetailsPanelEl?.remove();
+    this.macroDetailsPanelEl = null;
+    this.macroDetailsListEl = null;
+    this.macroDetailsCollapseIndicatorEl = null;
+    this.activeMacroDetailsCanvasFile = null;
+    this.lastMacroDetailsDays = null;
+  }
+
+  async refreshMacroDetailsOverlay() {
+    if (!this.activeMacroDetailsCanvasFile || !this.macroDetailsListEl) return;
+    const canvasFile = this.activeMacroDetailsCanvasFile;
+    const days = await this.computeMacroDetailsForCanvas(canvasFile);
+    // The active canvas may have changed while the above await was in flight.
+    if (this.activeMacroDetailsCanvasFile !== canvasFile || !this.macroDetailsListEl) return;
+    this.renderMacroDetailsPanel(days);
+  }
+
+  renderMacroDetailsPanel(days) {
+    this.lastMacroDetailsDays = days;
+    const listEl = this.macroDetailsListEl;
+    if (!listEl) return;
+
+    if (this.macroDetailsCollapseIndicatorEl) {
+      this.macroDetailsCollapseIndicatorEl.textContent = this.macroDetailsPanelCollapsed ? "▸" : "▾";
+    }
+    this.macroDetailsPanelEl?.toggleClass?.("is-collapsed", this.macroDetailsPanelCollapsed);
+    listEl.style.display = this.macroDetailsPanelCollapsed ? "none" : "";
+    if (this.macroDetailsPanelCollapsed) return;
+
+    listEl.empty();
+    const unit = normalizeEnergyUnit(this.settings?.energyUnit);
+    const roundEnergy = (kcal) => Math.round(convertKcalToDisplayEnergy(kcal, unit));
+    const activeDays = (Array.isArray(days) ? days : []).filter((d) => d.meals.length > 0 || d.uncalculatedCount > 0);
+
+    if (activeDays.length === 0) {
+      listEl.createDiv({ cls: "weekly-meal-shopper-macro-details-empty", text: "No recipes planned this week yet." });
+      return;
+    }
+
+    for (const day of days) {
+      if (day.meals.length === 0 && day.uncalculatedCount === 0) continue;
+      const dayCollapsed = this.macroDetailsCollapsedDays.has(day.day);
+
+      const dayEl = listEl.createDiv({ cls: "weekly-meal-shopper-macro-day" });
+      const dayHeader = dayEl.createDiv({ cls: "weekly-meal-shopper-macro-day-header" });
+      dayHeader.setAttribute("role", "button");
+      dayHeader.setAttribute("tabindex", "0");
+      dayHeader.createDiv({ cls: "weekly-meal-shopper-collapse-indicator", text: dayCollapsed ? "▸" : "▾" });
+      dayHeader.createDiv({ cls: "weekly-meal-shopper-macro-day-name", text: day.displayName });
+      dayHeader.createDiv({ cls: "weekly-meal-shopper-macro-day-total", text: `${roundEnergy(day.totalKcal)} ${unit}` });
+      const toggleDay = () => {
+        if (this.macroDetailsCollapsedDays.has(day.day)) this.macroDetailsCollapsedDays.delete(day.day);
+        else this.macroDetailsCollapsedDays.add(day.day);
+        this.renderMacroDetailsPanel(this.lastMacroDetailsDays || []);
+      };
+      dayHeader.addEventListener("click", toggleDay);
+      dayHeader.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleDay(); }
+      });
+
+      if (dayCollapsed) continue;
+
+      const dayBody = dayEl.createDiv({ cls: "weekly-meal-shopper-macro-day-body" });
+      dayBody.createDiv({
+        cls: "weekly-meal-shopper-macro-day-macros",
+        text: `Protein ${Math.round(day.totalProtein)}g · Carbs ${Math.round(day.totalCarbs)}g · Fat ${Math.round(day.totalFat)}g`,
+      });
+      for (const meal of day.meals) {
+        const mealEl = dayBody.createDiv({ cls: "weekly-meal-shopper-macro-meal-row" });
+        const label = meal.mealType ? `${meal.name} (${meal.mealType})` : meal.name;
+        mealEl.createDiv({ cls: "weekly-meal-shopper-macro-meal-name", text: label });
+        mealEl.createDiv({ cls: "weekly-meal-shopper-macro-meal-kcal", text: `${roundEnergy(meal.kcal)} ${unit}` });
+      }
+      if (day.uncalculatedCount > 0) {
+        const note = day.uncalculatedCount === 1 ? "1 meal not yet calculated" : `${day.uncalculatedCount} meals not yet calculated`;
+        dayBody.createDiv({ cls: "weekly-meal-shopper-macro-day-note", text: note });
+      }
+    }
   }
 
   async refreshMealCoverageOverlay() {
@@ -8549,8 +8776,11 @@ class WeeklyMealShopperPlugin extends Plugin {
 
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
     if (fm.TrackMacros !== true) {
-      if (!silent) new Notice(`Macro tracking is off for "${file.basename}" (set TrackMacros: true in frontmatter).`);
-      return null;
+      // Running this command IS the opt-in — flip the frontmatter for this
+      // recipe automatically rather than requiring a separate manual step.
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        frontmatter.TrackMacros = true;
+      });
     }
 
     let ingredients = [];
@@ -8793,46 +9023,25 @@ class WeeklyMealShopperPlugin extends Plugin {
     });
   }
 
-  // Loads whichever primary source settings.nutritionDatabaseSource selects
-  // ("builtin" | "downloaded" | "custom", each falling back to the bundled
-  // default on a missing file or invalid JSON), merges the live-lookup cache
-  // on top (fills gaps only), then manual overrides on top of that (highest
-  // priority — wins over both the primary source and the cache).
+  // Always reads the downloaded USDA Foundation Foods dataset — there is no
+  // user-facing choice of source anymore (previously "builtin" | "downloaded"
+  // | "custom"). Falls back to the small bundled default only when nothing
+  // has been downloaded yet or the downloaded file is unreadable, so
+  // NUTRITION_ENTRIES is never left completely empty. Merges the live-lookup
+  // cache on top (fills gaps only), then manual overrides on top of that
+  // (highest priority — wins over both the downloaded set and the cache).
   async loadNutritionConfig() {
     await this.ensureNutritionConfigFile();
-    const source = normalizeNutritionDatabaseSource(this.settings.nutritionDatabaseSource);
     let primaryConfig = null;
 
-    if (source === "custom") {
-      const customPath = String(this.settings.nutritionDatabasePath || "").trim();
-      if (customPath) {
-        const normalizedCustomPath = normalizePath(customPath);
-        const customExists = await this.app.vault.adapter.exists(normalizedCustomPath);
-        if (customExists) {
-          try {
-            primaryConfig = JSON.parse(await this.app.vault.adapter.read(normalizedCustomPath));
-          } catch (error) {
-            console.error("[weekly-meal-shopper] Failed to parse custom nutrition database:", error);
-            new Notice("Custom nutrition database is invalid JSON. Using built-in defaults.");
-          }
-        } else {
-          new Notice(`Custom nutrition database not found: ${customPath}. Using built-in defaults.`);
-        }
-      } else {
-        new Notice("No custom nutrition database path set. Using built-in defaults.");
-      }
-    } else if (source === "downloaded") {
-      const configPath = normalizePath(DOWNLOADED_NUTRITION_CONFIG_PATH);
-      const exists = await this.app.vault.adapter.exists(configPath);
-      if (exists) {
-        try {
-          primaryConfig = JSON.parse(await this.app.vault.adapter.read(configPath));
-        } catch (error) {
-          console.error("[weekly-meal-shopper] Failed to parse downloaded nutrition database:", error);
-          new Notice("Downloaded nutrition database is invalid JSON. Using built-in defaults.");
-        }
-      } else {
-        new Notice("No downloaded nutrition database yet — run \"Download nutrition dataset\" first. Using built-in defaults.");
+    const downloadedPath = normalizePath(DOWNLOADED_NUTRITION_CONFIG_PATH);
+    const downloadedExists = await this.app.vault.adapter.exists(downloadedPath);
+    if (downloadedExists) {
+      try {
+        primaryConfig = JSON.parse(await this.app.vault.adapter.read(downloadedPath));
+      } catch (error) {
+        console.error("[weekly-meal-shopper] Failed to parse downloaded nutrition database:", error);
+        new Notice("Downloaded nutrition database is invalid JSON. Using built-in defaults.");
       }
     }
 
@@ -8899,7 +9108,24 @@ class WeeklyMealShopperPlugin extends Plugin {
       normalizePath(DOWNLOADED_NUTRITION_CONFIG_PATH),
       `${JSON.stringify(config, null, 2)}\n`
     );
-    new Notice(`Downloaded nutrition dataset saved (${entryCount} ingredients). Set "Nutrition database source" to "Downloaded" to use it.`);
+    new Notice(`Downloaded nutrition dataset saved (${entryCount} ingredients).`);
+  }
+
+  // Macro tracking always uses the USDA dataset — there's no source choice
+  // to make, so just make sure it's actually been downloaded. Called
+  // whenever macrosEnabled turns on (settings toggle) and once at startup
+  // for anyone who already had it on. No-ops quietly if already downloaded,
+  // on mobile (downloadNutritionDataset handles that Notice itself), or
+  // macros is off.
+  async ensureDownloadedNutritionDatasetIsActive() {
+    if (!this.settings.macrosEnabled) return;
+    if (Platform.isMobileApp) return;
+
+    const downloadedPath = normalizePath(DOWNLOADED_NUTRITION_CONFIG_PATH);
+    const alreadyDownloaded = await this.app.vault.adapter.exists(downloadedPath);
+    if (!alreadyDownloaded) {
+      await this.downloadNutritionDataset();
+    }
   }
 
   // Dispatches to whichever provider settings.nutritionLiveLookupProvider
@@ -9384,6 +9610,18 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: title });
   }
 
+  // A lighter-weight grouping label for use INSIDE a foldable section's body
+  // (e.g. "Live lookup fallback" within the Nutrition & Macros foldable).
+  // Deliberately NOT an <h3> — renderCategoryHeading's h3 is reserved for
+  // top-level page sections, and reusing it in a nested context makes an
+  // inner grouping visually indistinguishable from the next real top-level
+  // section that follows once the foldable closes.
+  renderSubHeading(containerEl, { title, description = "" }) {
+    const wrap = containerEl.createDiv({ cls: "weekly-meal-shopper-subheading" });
+    wrap.createDiv({ cls: "weekly-meal-shopper-subheading-title", text: title });
+    if (description) wrap.createDiv({ cls: "weekly-meal-shopper-subheading-desc", text: description });
+  }
+
   async display() {
     const { containerEl } = this;
     containerEl.empty();
@@ -9408,7 +9646,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
     new Setting(mealPrepBody)
       .setName("Household size")
-      .setDesc("How many portions a single planned meal instance needs to feed. Drives weekly batch-scaling and the canvas coverage overlay — e.g. a family of 4 needs 4 portions per planned dinner.")
+      .setDesc("How many portions a single planned meal instance needs to feed, by default. Drives weekly batch-scaling and the canvas coverage overlay — e.g. a family of 4 needs 4 portions per planned dinner. Override per-recipe with a PortionsPerMeal frontmatter field on recipes that need more or less (e.g. a side dish).")
       .addText((text) =>
         text
           .setPlaceholder("1")
@@ -9991,13 +10229,17 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
 
     new Setting(body)
       .setName("Enable macro tracking")
-      .setDesc("Master switch for the 'Calculate recipe macros' commands. Off by default — fully inert until turned on.")
+      .setDesc("Master switch for the 'Calculate recipe macros' commands. Off by default — fully inert until turned on. Turning this on automatically downloads the USDA Foundation Foods dataset (desktop only) — the small built-in dataset is only used as a fallback if that download hasn't happened yet or fails.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.macrosEnabled === true)
           .onChange(async (value) => {
             this.plugin.settings.macrosEnabled = value;
             await this.plugin.saveSettings();
+            if (value) {
+              await this.plugin.ensureDownloadedNutritionDatasetIsActive();
+              await this.display();
+            }
           })
       );
 
@@ -10015,65 +10257,36 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
           })
       );
 
-    const source = normalizeNutritionDatabaseSource(this.plugin.settings.nutritionDatabaseSource);
-
     new Setting(body)
-      .setName("Nutrition database source")
-      .setDesc("Which local dataset ingredient lookups use. \"Downloaded\" and \"Custom file\" each show their own extra controls below once selected.")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("builtin", "Built-in (~130 common ingredients)")
-          .addOption("downloaded", "Downloaded (USDA Foundation Foods)")
-          .addOption("custom", "Custom file")
-          .setValue(source)
+      .setName("Show macro details on canvas")
+      .setDesc("A separate floating panel on the meal-plan canvas (opposite corner from Meal Coverage) with per-day kcal/protein/carbs/fat totals — the whole panel and each day are collapsible.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.macroDetailsEnabled === true)
           .onChange(async (value) => {
-            this.plugin.settings.nutritionDatabaseSource = normalizeNutritionDatabaseSource(value);
+            this.plugin.settings.macroDetailsEnabled = value;
             await this.plugin.saveSettings();
-            await this.display();
+            this.plugin.handleActiveLeafChangeForCoverage(this.app.workspace.activeLeaf);
           })
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Reload nutrition database").onClick(async () => {
-          const config = await this.plugin.loadNutritionConfig();
-          const count = config && typeof config.entries === "object" ? Object.keys(config.entries).length : 0;
-          new Notice(`Nutrition database reloaded (${count} ingredient(s)).`);
-        })
       );
 
-    if (source === "custom") {
-      new Setting(body)
-        .setName("Custom nutrition database path")
-        .setDesc("Vault-relative path to a JSON file shaped like the bundled nutrition-database.json.")
-        .addText((text) =>
-          text
-            .setPlaceholder("Utility/my-nutrition-database.json")
-            .setValue(this.plugin.settings.nutritionDatabasePath || "")
-            .onChange(async (value) => {
-              this.plugin.settings.nutritionDatabasePath = String(value || "").trim();
-              await this.plugin.saveSettings();
-            })
-        );
-    }
-
-    if (source === "downloaded") {
-      new Setting(body)
-        .setName("Download nutrition dataset")
-        .setDesc(
-          Platform.isMobileApp
-            ? "Not available on mobile (needs desktop-only ZIP decompression). Use live lookup or a custom file instead."
-            : "Fetches USDA's Foundation Foods dataset (~2,000 ingredients, public domain) and stores it locally — no network needed afterward."
-        )
-        .addButton((btn) => {
-          btn.setButtonText("Download now").onClick(async () => {
-            await this.plugin.downloadNutritionDataset();
-          });
-          if (Platform.isMobileApp) btn.setDisabled(true);
+    new Setting(body)
+      .setName("USDA nutrition dataset")
+      .setDesc(
+        Platform.isMobileApp
+          ? "Downloaded automatically on desktop when macro tracking is enabled. Not available on mobile (needs desktop-only ZIP decompression) — falls back to the small built-in dataset there."
+          : "Downloaded automatically when macro tracking is enabled (USDA Foundation Foods, public domain). Use this to force a fresh download."
+      )
+      .addButton((btn) => {
+        btn.setButtonText("Re-download now").onClick(async () => {
+          await this.plugin.downloadNutritionDataset();
         });
-    }
+        if (Platform.isMobileApp) btn.setDisabled(true);
+      });
 
-    this.renderCategoryHeading(body, {
+    this.renderSubHeading(body, {
       title: "Live lookup fallback",
-      description: "For ingredients not found in the local dataset above, query an online provider once and cache the result.",
+      description: "For ingredients not found in the USDA dataset above, query an online provider once and cache the result.",
     });
 
     new Setting(body)
@@ -10124,7 +10337,7 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       }
     }
 
-    this.renderCategoryHeading(body, {
+    this.renderSubHeading(body, {
       title: "Manual matches",
       description: "Pin a specific ingredient to a fixed per-100g value — wins over the database source and live lookup above.",
     });

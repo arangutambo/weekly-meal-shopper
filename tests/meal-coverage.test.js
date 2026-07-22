@@ -195,11 +195,12 @@ test("computeMealCoverageForCanvas classifies status using household size", asyn
   assert.equal(rows[0].status, "red");
 });
 
-test("a recipe's ServingMultiplier scales how many household-size portions one planned instance needs", async () => {
-  // Same shape as the previous test, but this recipe only needs half a
-  // normal household-size portion per instance (e.g. a fruit side dish) —
-  // 3 planned instances x (4 household x 0.5) = 6 portions needed, and a
-  // single 4-portion batch no longer covers it (still short, but less short).
+test("a recipe's PortionsPerMeal overrides how many portions one planned instance needs", async () => {
+  // Same shape as the previous test, but this recipe only needs 2 portions
+  // per instance instead of the full household size of 4 (e.g. a fruit side
+  // dish where each person only really eats half a normal serving) —
+  // 3 planned instances x 2 = 6 portions needed, and a single 4-portion
+  // batch no longer covers it (still short, but less short than 3 batches).
   const canvasText = canvasJson([
     { id: "f1", type: "file", file: "Recipes/Fruit.md", x: 0, y: 0, width: 100, height: 100 },
     { id: "f2", type: "file", file: "Recipes/Fruit.md", x: 200, y: 0, width: 100, height: 100 },
@@ -209,7 +210,7 @@ test("a recipe's ServingMultiplier scales how many household-size portions one p
     householdSize: 4,
     canvasPath: "Plan.canvas",
     canvasText,
-    recipeFrontmatter: { "Recipes/Fruit.md": { type: "Recipe", Portions: 4, ServingMultiplier: 0.5 } },
+    recipeFrontmatter: { "Recipes/Fruit.md": { type: "Recipe", Portions: 4, PortionsPerMeal: 2 } },
   });
 
   const rows = await plugin.computeMealCoverageForCanvas(canvasFile);
@@ -217,7 +218,7 @@ test("a recipe's ServingMultiplier scales how many household-size portions one p
   assert.equal(rows[0].cooksNeeded, 2); // 6 portions needed / 4 per batch -> 2 batches, not 3
 });
 
-test("ServingMultiplier defaults to 1 (no change) when the frontmatter field is absent", async () => {
+test("PortionsPerMeal defaults to the household size when the frontmatter field is absent", async () => {
   const canvasText = canvasJson([
     { id: "f1", type: "file", file: "Recipes/Curry.md", x: 0, y: 0, width: 100, height: 100 },
   ]);

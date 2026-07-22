@@ -13,7 +13,7 @@ const LIVE_NUTRITION_CACHE_PATH = ".obsidian/plugins/weekly-meal-shopper/nutriti
 function makePluginWithFiles(initialFiles = {}) {
   const files = new Map(Object.entries(initialFiles));
   const plugin = new PluginClass();
-  plugin.settings = { nutritionDatabasePath: "" };
+  plugin.settings = {};
   plugin.app = {
     vault: {
       adapter: {
@@ -51,79 +51,54 @@ test("ensureNutritionConfigFile leaves an existing file untouched", async () => 
   assert.equal(files.get(NUTRITION_CONFIG_PATH), custom);
 });
 
-test("loadNutritionConfig uses the bundled default when no custom path is set", async () => {
+test("loadNutritionConfig uses the bundled default when nothing has been downloaded yet", async () => {
   const { plugin } = makePluginWithFiles();
   const config = await plugin.loadNutritionConfig();
   assert.equal(config.entries["chicken breast"].kcal, 165);
   assert.equal(ctx.estimateIngredientMacrosPer100g("chicken breast").kcal, 165);
 });
 
-test("a valid custom nutritionDatabasePath takes priority over the bundled default when source is 'custom'", async () => {
-  const customPath = "Utility/my-nutrition.json";
-  const customContent = JSON.stringify({
-    entries: { "special ingredient": { kcal: 999, protein: 1, carbs: 1, fat: 1 } },
-  });
-  const { plugin } = makePluginWithFiles({ [customPath]: customContent });
-  plugin.settings.nutritionDatabaseSource = "custom";
-  plugin.settings.nutritionDatabasePath = customPath;
-
-  const config = await plugin.loadNutritionConfig();
-  assert.equal(config.entries["special ingredient"].kcal, 999);
-  // NUTRITION_ENTRIES (module global) now reflects the custom file only
-  assert.equal(ctx.estimateIngredientMacrosPer100g("special ingredient").kcal, 999);
-  assert.equal(ctx.estimateIngredientMacrosPer100g("chicken breast"), null);
-});
-
-test("setting a custom path without switching source to 'custom' has no effect (source stays builtin)", async () => {
-  const customPath = "Utility/my-nutrition.json";
-  const customContent = JSON.stringify({ entries: { "special ingredient": { kcal: 999, protein: 1, carbs: 1, fat: 1 } } });
-  const { plugin } = makePluginWithFiles({ [customPath]: customContent });
-  plugin.settings.nutritionDatabasePath = customPath; // source left at default "builtin"
-
-  const config = await plugin.loadNutritionConfig();
-  assert.equal(config.entries["chicken breast"].kcal, 165);
-});
-
-test("loadNutritionConfig falls back to bundled defaults when the custom path is missing", async () => {
-  const { plugin } = makePluginWithFiles();
-  plugin.settings.nutritionDatabaseSource = "custom";
-  plugin.settings.nutritionDatabasePath = "Utility/does-not-exist.json";
-
-  const config = await plugin.loadNutritionConfig();
-  assert.equal(config.entries["chicken breast"].kcal, 165);
-});
-
-test("loadNutritionConfig falls back to bundled defaults when the custom path has invalid JSON", async () => {
-  const customPath = "Utility/broken.json";
-  const { plugin } = makePluginWithFiles({ [customPath]: "{ not valid json" });
-  plugin.settings.nutritionDatabaseSource = "custom";
-  plugin.settings.nutritionDatabasePath = customPath;
-
-  const config = await plugin.loadNutritionConfig();
-  assert.equal(config.entries["chicken breast"].kcal, 165);
-});
-
-test("nutritionDatabaseSource 'downloaded' reads the downloaded file when present", async () => {
+test("loadNutritionConfig reads the downloaded USDA file when present — there's no source to choose anymore, it's always used", async () => {
   const downloadedContent = JSON.stringify({
     entries: { "foraged mushroom": { kcal: 22, protein: 3, carbs: 3, fat: 0.3 } },
   });
   const { plugin } = makePluginWithFiles({ [DOWNLOADED_NUTRITION_CONFIG_PATH]: downloadedContent });
-  plugin.settings.nutritionDatabaseSource = "downloaded";
 
   const config = await plugin.loadNutritionConfig();
   assert.equal(config.entries["foraged mushroom"].kcal, 22);
   assert.equal(ctx.estimateIngredientMacrosPer100g("foraged mushroom").kcal, 22);
 });
 
-test("nutritionDatabaseSource 'downloaded' falls back to bundled defaults when nothing has been downloaded yet", async () => {
-  const { plugin } = makePluginWithFiles();
-  plugin.settings.nutritionDatabaseSource = "downloaded";
+test("loadNutritionConfig falls back to bundled defaults when the downloaded file has invalid JSON", async () => {
+  const { plugin } = makePluginWithFiles({ [DOWNLOADED_NUTRITION_CONFIG_PATH]: "{ not valid json" });
 
   const config = await plugin.loadNutritionConfig();
   assert.equal(config.entries["chicken breast"].kcal, 165);
 });
 
-test("the live-lookup cache always merges on top, filling gaps without overriding the primary source", async () => {
+test("estimateIngredientMacrosPer100g word-overlap fallback matches verbose USDA-style descriptions", async () => {
+  // Real USDA bulk-dataset entries are long, official descriptions, longer
+  // than the short text a user actually types — the plain substring check
+  // ("does the ingredient text CONTAIN this pattern?") can never match them
+  // in that direction. Every word the user typed must still appear
+  // somewhere among the pattern's words, in any order.
+  const downloadedContent = JSON.stringify({
+    entries: {
+      "chicken broiler or fryers breast skinless boneless meat only cooked braised": { kcal: 173, protein: 29, carbs: 0, fat: 6 },
+    },
+  });
+  const { plugin } = makePluginWithFiles({ [DOWNLOADED_NUTRITION_CONFIG_PATH]: downloadedContent });
+
+  await plugin.loadNutritionConfig();
+  const macros = ctx.estimateIngredientMacrosPer100g("chicken breast");
+  assert.ok(macros, "expected the word-overlap fallback to find a match");
+  assert.equal(macros.kcal, 173);
+
+  // Words that aren't all present should still fail to match.
+  assert.equal(ctx.estimateIngredientMacrosPer100g("chicken thigh"), null);
+});
+
+test("the live-lookup cache always merges on top, filling gaps without overriding the downloaded/bundled data", async () => {
   const cacheContent = JSON.stringify({
     entries: {
       "yak butter": { kcal: 720, protein: 0.5, carbs: 0, fat: 81 },
@@ -132,7 +107,6 @@ test("the live-lookup cache always merges on top, filling gaps without overridin
     },
   });
   const { plugin } = makePluginWithFiles({ [LIVE_NUTRITION_CACHE_PATH]: cacheContent });
-  // source left at default "builtin"
 
   await plugin.loadNutritionConfig();
   assert.equal(ctx.estimateIngredientMacrosPer100g("yak butter").kcal, 720);
@@ -149,7 +123,7 @@ test("saveNutritionOverride writes an entry that loadNutritionConfig picks up", 
   assert.equal(ctx.estimateIngredientMacrosPer100g("my special chicken").kcal, 200);
 });
 
-test("a manual override wins over the primary source on an exact key conflict", async () => {
+test("a manual override wins over the downloaded/bundled data on an exact key conflict", async () => {
   const { plugin } = makePluginWithFiles();
   await plugin.saveNutritionOverride("chicken breast", { kcal: 999, protein: 1, carbs: 1, fat: 1 });
 
@@ -166,7 +140,7 @@ test("a manual override wins over the live-lookup cache too", async () => {
   assert.equal(ctx.estimateIngredientMacrosPer100g("yak butter").kcal, 1);
 });
 
-test("removeNutritionOverride deletes the override so the primary source resolves again", async () => {
+test("removeNutritionOverride deletes the override so the downloaded/bundled data resolves again", async () => {
   const { plugin } = makePluginWithFiles();
   await plugin.saveNutritionOverride("chicken breast", { kcal: 999, protein: 1, carbs: 1, fat: 1 });
   await plugin.loadNutritionConfig();
@@ -184,4 +158,39 @@ test("loadNutritionOverrideEntries auto-creates an empty overrides file", async 
   const entries = await plugin.loadNutritionOverrideEntries();
   assert.deepEqual(Object.keys(entries), []);
   assert.ok(files.has(NUTRITION_OVERRIDES_PATH));
+});
+
+test("ensureDownloadedNutritionDatasetIsActive does nothing when macro tracking is off", async () => {
+  const { plugin, files } = makePluginWithFiles();
+  plugin.settings.macrosEnabled = false;
+
+  await plugin.ensureDownloadedNutritionDatasetIsActive();
+
+  assert.equal(files.has(DOWNLOADED_NUTRITION_CONFIG_PATH), false);
+});
+
+test("ensureDownloadedNutritionDatasetIsActive does not re-download when the file already exists", async () => {
+  const downloadedContent = JSON.stringify({ entries: { "foraged mushroom": { kcal: 22, protein: 3, carbs: 3, fat: 0.3 } } });
+  const { plugin, files } = makePluginWithFiles({ [DOWNLOADED_NUTRITION_CONFIG_PATH]: downloadedContent });
+  plugin.settings.macrosEnabled = true;
+
+  // requestUrl throws in the test stub, so if this reached downloadNutritionDataset
+  // (network path) the test would fail — proves the already-downloaded check short-circuits it.
+  await plugin.ensureDownloadedNutritionDatasetIsActive();
+
+  assert.equal(files.get(DOWNLOADED_NUTRITION_CONFIG_PATH), downloadedContent);
+});
+
+test("ensureDownloadedNutritionDatasetIsActive is a no-op on mobile", async () => {
+  const { plugin, files } = makePluginWithFiles();
+  plugin.settings.macrosEnabled = true;
+
+  ctx.__obsidian.Platform.isMobileApp = true;
+  try {
+    await plugin.ensureDownloadedNutritionDatasetIsActive();
+  } finally {
+    ctx.__obsidian.Platform.isMobileApp = false;
+  }
+
+  assert.equal(files.has(DOWNLOADED_NUTRITION_CONFIG_PATH), false);
 });

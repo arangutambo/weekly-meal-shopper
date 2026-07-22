@@ -20,10 +20,10 @@ To use these features you must supply **your own OpenAI API key** in the plugin 
 
 The optional **macro-tracking nutrition lookup** can also touch the network, and is off by default:
 
-- `Download nutrition dataset` fetches USDA FoodData Central's public-domain Foundation Foods dataset once (`fdc.nal.usda.gov`) and stores it locally — no network needed afterward. Desktop only.
+- Turning on **macro tracking** in settings automatically fetches USDA FoodData Central's public-domain Foundation Foods dataset once (`fdc.nal.usda.gov`) and stores it locally — no network needed afterward. Desktop only; on mobile it falls back to a small built-in offline dataset instead.
 - The **live lookup fallback** (off by default) sends an ingredient name to whichever provider you choose — USDA FoodData Central (`api.nal.usda.gov`, requires your own free API key) or Open Food Facts (`world.openfoodfacts.org`, no key) — only for ingredients not already found locally, and every result is cached so the same ingredient is never looked up twice.
 
-If you never turn on live lookup or click the download button, no nutrition-related network requests are made.
+If you never turn on macro tracking or live lookup, no nutrition-related network requests are made.
 
 The plugin collects no telemetry and contains no ads.
 

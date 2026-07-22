@@ -1,6 +1,13 @@
 # Local plugin settings (can contain API keys / personal config)
 data.json
 
+# Auto-generated/downloaded per-vault nutrition data — not repo assets, the
+# shipped default lives in main.js's DEFAULT_NUTRITION_CONFIG instead.
+nutrition-database.json
+nutrition-database-downloaded.json
+nutrition-live-cache.json
+nutrition-overrides.json
+
 # Environment / secrets
 .env
 .env.*
