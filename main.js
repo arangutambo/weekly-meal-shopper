@@ -5004,12 +5004,14 @@ class NutritionMatchModal extends Modal {
     const proteinInput = makeNumberField("Protein (g)", current?.protein);
     const carbsInput = makeNumberField("Carbs (g)", current?.carbs);
     const fatInput = makeNumberField("Fat (g)", current?.fat);
+    const gramsPerUnitInput = makeNumberField("Grams per unit (optional — e.g. 1 egg/fruit)", current?.gramsPerUnit);
 
     const applyEntry = (macros) => {
       kcalInput.value = Number.isFinite(macros.kcal) ? String(macros.kcal) : "";
       proteinInput.value = Number.isFinite(macros.protein) ? String(macros.protein) : "";
       carbsInput.value = Number.isFinite(macros.carbs) ? String(macros.carbs) : "";
       fatInput.value = Number.isFinite(macros.fat) ? String(macros.fat) : "";
+      gramsPerUnitInput.value = Number.isFinite(macros.gramsPerUnit) ? String(macros.gramsPerUnit) : "";
     };
 
     const renderResults = (query) => {
@@ -5043,6 +5045,8 @@ class NutritionMatchModal extends Modal {
         carbs: Number(carbsInput.value) || 0,
         fat: Number(fatInput.value) || 0,
       };
+      const gramsPerUnit = Number(gramsPerUnitInput.value);
+      if (Number.isFinite(gramsPerUnit) && gramsPerUnit > 0) macros.gramsPerUnit = gramsPerUnit;
       this.submitted = true;
       this.options.onSubmit?.(macros);
       this.close();
@@ -8858,17 +8862,10 @@ class WeeklyMealShopperPlugin extends Plugin {
       }
     }
 
-    const generated = buildMacroCalculationReport(reports, recipes.length);
-    const outputPath = normalizePath("Utility/🥗 Macro Calculation Report.md");
-    const existing = this.app.vault.getAbstractFileByPath(outputPath);
-    if (existing instanceof TFile) {
-      await this.app.vault.modify(existing, generated);
-      await this.app.workspace.getLeaf(true).openFile(existing);
-    } else {
-      const created = await this.app.vault.create(outputPath, generated);
-      await this.app.workspace.getLeaf(true).openFile(created);
+    if (reports.length > 0) {
+      console.warn(`[weekly-meal-shopper] ${buildMacroCalculationReport(reports, recipes.length)}`);
     }
-    new Notice(`Calculated macros for ${recipes.length} recipe(s); ${reports.length} with findings.`);
+    new Notice(`Calculated macros for ${recipes.length} recipe(s); ${reports.length} with findings (see console).`);
   }
 
   getRecipePortions(file) {
@@ -10350,8 +10347,9 @@ class WeeklyMealShopperSettingTab extends PluginSettingTab {
       for (const name of overrideNames) {
         const macros = nutritionOverrideEntries[name];
         const row = overridesListEl.createDiv({ cls: "weekly-meal-shopper-entry-row" });
+        const gramsPerUnitSuffix = Number.isFinite(macros?.gramsPerUnit) ? `, ${macros.gramsPerUnit}g/unit` : "";
         row.createEl("span", {
-          text: `${name} — ${Math.round(macros?.kcal || 0)} kcal, ${Math.round(macros?.protein || 0)}g protein, ${Math.round(macros?.carbs || 0)}g carbs, ${Math.round(macros?.fat || 0)}g fat`,
+          text: `${name} — ${Math.round(macros?.kcal || 0)} kcal, ${Math.round(macros?.protein || 0)}g protein, ${Math.round(macros?.carbs || 0)}g carbs, ${Math.round(macros?.fat || 0)}g fat${gramsPerUnitSuffix}`,
           cls: "weekly-meal-shopper-entry-text",
         });
         const removeBtn = row.createEl("button", { text: "Remove", cls: "weekly-meal-shopper-remove-btn" });

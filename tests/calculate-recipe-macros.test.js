@@ -42,6 +42,7 @@ function makePlugin({ macrosEnabled, frontmatter, noteContent }) {
         currentContent = content;
         lastWrittenContent = content;
       },
+      getMarkdownFiles: () => [file],
       adapter: {
         exists: async (p) => vaultFiles.has(p),
         read: async (p) => {
@@ -105,4 +106,51 @@ test("calculateRecipeMacros leaves an already-true TrackMacros untouched (no red
 
   await plugin.calculateRecipeMacros(file, { silent: true });
   assert.equal(getFrontmatter().TrackMacros, true);
+});
+
+test("calculateMacrosForAllRecipes logs findings to the console instead of creating a report note", async () => {
+  const { plugin } = makePlugin({
+    macrosEnabled: true,
+    frontmatter: { type: "Recipe", Portions: 1, TrackMacros: true },
+    noteContent: RECIPE_BODY,
+  });
+  // "chicken breast" resolves fine per-100g but has no gramsPerUnit entry —
+  // measuring it by count ("unit") instead of weight triggers a real
+  // finding, same shape as the user's original mandarin bug report.
+  plugin.getRecipeIngredients = async () => [ing("chicken breast", "unit", 1)];
+  // vault.create/vault.getAbstractFileByPath/workspace intentionally left
+  // undefined — if calculateMacrosForAllRecipes tried to write or open a
+  // report note, calling a missing method would throw and fail the test.
+
+  const originalWarn = console.warn;
+  const warnMessages = [];
+  console.warn = (...args) => warnMessages.push(args.join(" "));
+  try {
+    await plugin.calculateMacrosForAllRecipes();
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warnMessages.length, 1);
+  assert.match(warnMessages[0], /Macro Calculation Report/);
+  assert.match(warnMessages[0], /No per-unit weight for "chicken breast"/);
+});
+
+test("calculateMacrosForAllRecipes stays silent on the console when there are no findings", async () => {
+  const { plugin } = makePlugin({
+    macrosEnabled: true,
+    frontmatter: { type: "Recipe", Portions: 2, TrackMacros: true },
+    noteContent: RECIPE_BODY,
+  });
+
+  const originalWarn = console.warn;
+  let warnCalled = false;
+  console.warn = () => { warnCalled = true; };
+  try {
+    await plugin.calculateMacrosForAllRecipes();
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warnCalled, false);
 });
